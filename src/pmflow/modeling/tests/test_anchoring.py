@@ -124,3 +124,40 @@ def test_val_train_split_times(frame):
     tr = frame[frame.split == "train"]
     va = frame[frame.split == "val"]
     assert tr.event_close.max() < D.VAL_SPLIT_START <= va.cutoff_ts.min()
+
+
+def test_frozen_prediction_files_cover_all_splits():
+    import glob
+    files = glob.glob(str(D.ART / "preds_*.parquet"))
+    if not files:
+        pytest.skip("no frozen predictions yet")
+    ref = D.load_frame()[["snapshot_id", "split"]]
+    for f in files:
+        p = pd.read_parquet(f)
+        assert p.snapshot_id.is_unique and p.p_model.between(0, 1).all() and p.p_model.notna().all()
+        assert set(p.snapshot_id) == set(ref.snapshot_id), f
+        assert set(p.split) == {"train", "val", "test"}
+        assert set(p.flag.unique()) <= {-1, 0, 1}
+
+
+def test_no_test_rows_reach_any_fit(monkeypatch):
+    """Instrument the two fit entry points and run the stage-2 fitting helpers on the real frame: every frame
+    that reaches a fit must be TRAIN only."""
+    from pmflow.modeling import models as MM
+    from pmflow.modeling import stage2_tabular as S2
+    try:
+        d = D.no_test(D.load_frame()).reset_index(drop=True)
+    except Exception as e:  # pragma: no cover
+        pytest.skip(str(e))
+    seen = []
+    orig = D.assert_fit_rows
+
+    def spy(df, allowed=D.FIT_SPLITS):
+        seen.append(set(df["split"]))
+        return orig(df, allowed)
+    monkeypatch.setattr(MM, "assert_fit_rows", spy)
+    full = D.load_frame()                     # includes val + test rows
+    S2.fit_lgbm_full(full, ["price_logit", "s_nsn_24h"], 5)
+    S2.fit_ridge_full(full, D.RIDGE_FEATURES, 1e-2)
+    S2.ridge_wf(d, D.RIDGE_FEATURES, l2_grid=[1e-2])
+    assert seen and all(s == {"train"} for s in seen)

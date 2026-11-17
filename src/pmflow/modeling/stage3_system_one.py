@@ -241,7 +241,7 @@ def run_heads(B=1000):
         out[nm + "_oof"] = tmp.to_numpy()
     out["s1_aux_informed_score"] = aux_score
     out.to_parquet(D.REPO / "data" / "modeling" / "stage3_resid.parquet", index=False)
-    v = R[(R.where == "val") & (R.weighting == "market")]
+    v = R[(R["where"] == "val") & (R.weighting == "market")]
     print(v[["model", "universe", "d_brier", "d_brier_lo", "d_brier_hi", "d_ll", "d_ll_lo", "d_ll_hi"]].round(4))
 
 

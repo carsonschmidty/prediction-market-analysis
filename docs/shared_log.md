@@ -161,3 +161,25 @@ Build: `.venv/bin/python -m pmflow.evaluation.snapshots` (idempotent, ~1 min). T
   wallet, $32.5k at 0.074); PM-007/PM-011 "fresh wallet" claims are not visible in taker trades.
 - Modeling: wallet features are corpus-relative (fresh = new to geopolitical/macro markets); full-history columns
   (`full_*`) cover only ~2k wallets. Prefer `fresh_nsn_*`, `dom_*`, `whale_*` with care; all thresholds untuned.
+
+## [2026-11-17 23:05 UTC] modeling — stages 1-6 done on TRAIN/VAL; result: informed-flow features add nothing over price (docs/modeling.md)
+- Rows: 24h-grid primary snapshots (train 115k / val 13.5k / test 34k). Baseline A reproduced exactly on the 6h grid;
+  on our rows in-scope val Brier 0.1777, macro val 0.1055.
+- Market-anchored models (price logit as fixed offset; LightGBM init_score, shallow + strong L2; rounds chosen on
+  event-grouped walk-forward folds inside train). On VAL no flow / wallet / weak-label-flag / context group beats the
+  same LightGBM given price only (lgbm_all - lgbm_price_only: in-scope -0.0007 [-0.0014,-0.0001], macro -0.0011
+  [-0.0022,+0.0001] Brier); a shuffled-feature placebo reproduces the val "gain" over raw price (+0.0030 vs +0.0033);
+  flow-only ridge (no intercept) +0.0002 [0.0000,0.0003]. With per-snapshot weights walk-forward picks 0 rounds.
+- FINDING for evaluation (please read docs/modeling.md §7): window-selection bias. Val and each walk-forward fold
+  contain only events that closed inside the window; YES "by date" markets close early, so these sets are YES-heavy
+  (market-weighted ybar - price: all train +0.014, walk-forward OOF rows +0.062, val +0.068; train snapshots <=7d
+  before event_close +0.098 vs >180d -0.080, diagnostic only). Any intercept / YES-shift fitted on such rows "wins"
+  val (stack with free intercept: +0.0097) without flow information. Test (resolved by 2026-11-17) is built the same
+  way. Candidates were therefore restricted to no-free-intercept models, and a price-only control is shipped.
+- Exploratory system one (gate NOT passed; ~75 CPU-min): ModernBERT encoder of gliclass-instruct-edge-v1.0 with a
+  fresh residual head, run in JAX (validated vs onnxruntime, max |logit diff| 2e-4). Question-only text does as well
+  as text+flow descriptors on val (topic/regime tilt, no train-OOF gain); descriptors add nothing.
+- BLOCKER (worked around, logged): PyTorch not installable — PyPI wheel is CUDA-13 only and needs ~4 GB nvidia libs
+  (disk), download.pytorch.org is proxy-blocked (403). GLiClass library and tasksource-decider-nano zero-shot not run.
+- Pre-registered (3): PRIMARY preds_lgbm_anchored, preds_stack_s1 (no intercept), preds_ridge_flow; control
+  preds_ctrl_lgbm_price_only. All in artifacts/modeling/, all splits incl. test. No test metric computed by modeling.

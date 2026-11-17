@@ -72,7 +72,7 @@ def fit_lgbm_full(d, feats, n_rounds, wscheme="market", monotone=None, params=No
 
 def ridge_wf(d, feats, wscheme="market", l2_grid=RIDGE_L2, **kw):
     """lambda by pooled OOF log loss (equal fold weight); returns best l2, oof resid, per-lambda table."""
-    folds = list(D.walk_forward_folds(d))
+    folds = [(k, f, s) for k, f, s in D.walk_forward_folds(d) if f.sum() >= 200 and s.sum() > 0]
     res, oofs = [], {}
     for l2 in l2_grid:
         oof = np.full(len(d), np.nan)
