@@ -67,3 +67,26 @@ Writing `docs/reported_cases.md` and `docs/labeling_plan.md` was rejected by the
 - Ingest workers stop automatically below a free-disk floor (trades/wallets 4 GB, prices 5 GB, maker fills 8 GB)
   so other roles keep room for their tables. Raw wallet activity rows are aggregated, not stored.
 - Sports/crypto market rows keep question/tags but drop description + raw payload.
+
+## [2026-11-17 21:25 UTC] data — BLOCKER/GAP: Data API trade + wallet history only reaches back to ~2023-11-18
+- `/v2/trades` and `/v2/activity` return nothing older than ~2023-11-18 (looks like a rolling ~3-year retention:
+  e.g. "Will Erdoğan win the 2023 Turkish presidential election?" ($4.8M volume) returns 0 trades; the earliest
+  trade we hold is 2023-11-18 21:12 UTC). Markets that closed before then have metadata + outcome but NO trades;
+  markets straddling the boundary have truncated early history.
+- Consequence for wallet features: first-seen / prior-market counts are LEFT-CENSORED at 2023-11-18. Wallets
+  that redeem/sell positions they never bought inside the window are flagged `pm_wallets.pre_window_activity`.
+  A wallet "first seen" in Nov–Dec 2023 may be much older. Treat freshness features before ~2024-01 as unreliable.
+- Only route to earlier trades found: HF dataset `SII-WANGZJ/Polymarket_data` (on-chain OrderFilled since
+  2022-11-21, 45.8 GB for trades.parquet) — does not fit our disk; would need ~60 GB free or range-read tooling.
+- Pre-2022 (AMM era) Polymarket trades are not available from any reachable source.
+
+## [2026-11-17 21:30 UTC] data — Data layer ready: markets, taxonomy, in-scope taker trades complete
+- `pm_markets`: 5,538,585 closed Polymarket markets with conservative resolution labels and taxonomy
+  (`category`, `geo_subtype`, `is_scheduled_election`, `in_scope`, `macro_comparison`, `taxonomy_rule`).
+  In scope: 9,706 (9,700 resolved). Macro comparison: 1,321. Counts: `artifacts/data/market_counts_by_year*.csv`.
+- `pm_trades` (view `pm_trades_v`): 22.46M taker trades, complete history (within the Data API window) for all
+  in-scope + macro markets; 100% wallet-attributed (proxy wallet); 978,553 distinct in-scope taker wallets.
+- Taxonomy hand-check (final rules): precision 98.2% on 110 in-scope, est. recall ≈95% from 120 hard negatives.
+- Still running in background (resumable): wallet histories (50.9k wallets) → maker fills → price history;
+  Kalshi markets → trades. Progress: `.venv/bin/python -m pmflow.data.ingest_polymarket --status`.
+- Gamma `volume_usd` ≠ taker notional (2–8× larger); use trade-level notional.

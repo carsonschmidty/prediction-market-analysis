@@ -32,6 +32,10 @@ SQL = [
               market_closed_time = m.closed_time, market_resolution_status = m.resolution_status
        FROM pm_markets m WHERE m.condition_id = w.condition_id
          AND (w.market_id IS NULL OR w.market_resolution_status IS DISTINCT FROM m.resolution_status)""",
+    """UPDATE pm_wallets w SET pre_window_activity = EXISTS (
+           SELECT 1 FROM pm_wallet_market_summary s WHERE s.wallet = w.wallet AND s.buy_usd = 0 AND s.split_usd = 0
+             AND s.sell_usd + s.redeem_usd + s.merge_usd > 0)
+              OR w.first_activity_ts < timestamptz '2023-12-01'""",
     "CREATE INDEX IF NOT EXISTS pm_wms_wallet_first_idx ON pm_wallet_market_summary (wallet, first_ts)",
     "ANALYZE pm_trades", "ANALYZE pm_markets", "ANALYZE pm_wallet_market_summary",
 ]

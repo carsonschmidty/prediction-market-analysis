@@ -1,0 +1,107 @@
+{
+  "pm_markets_closed": {
+    "rows": 5538585,
+    "min_ts": "2020-10-25 20:25:48+00",
+    "max_ts": "2026-11-17 20:25:20.313803+00"
+  },
+  "pm_markets_in_scope": {
+    "rows": 9706,
+    "min_ts": "2021-01-20 17:26:28+00",
+    "max_ts": "2026-11-17 18:01:33.973967+00"
+  },
+  "pm_markets_in_scope_resolved": {
+    "rows": 9700,
+    "min_ts": "2021-01-20 17:26:28+00",
+    "max_ts": "2026-11-17 18:01:33.973967+00"
+  },
+  "pm_markets_macro": {
+    "rows": 1321,
+    "min_ts": "2021-11-30 05:23:45+00",
+    "max_ts": "2026-11-13 22:48:10.082265+00"
+  },
+  "pm_trades_taker": {
+    "rows": 22456369,
+    "min_ts": "2023-11-18 21:12:39+00",
+    "max_ts": "2026-11-17 13:46:28+00"
+  },
+  "pm_trades_maker": {
+    "rows": 4381,
+    "min_ts": "2026-01-04 20:24:17+00",
+    "max_ts": "2026-02-03 07:30:36+00"
+  },
+  "pm_price_history": {
+    "rows": 731,
+    "min_ts": "2026-01-04 21:00:19+00",
+    "max_ts": "2026-02-03 07:00:28+00"
+  },
+  "pm_wallets": {
+    "rows": 177,
+    "min_ts": "2023-11-18 21:23:03+00",
+    "max_ts": "2026-06-11 23:56:27+00"
+  },
+  "pm_wallet_market_summary": {
+    "rows": 44047,
+    "min_ts": "2023-11-18 21:23:03+00",
+    "max_ts": "2026-11-17 21:10:01+00"
+  },
+  "kalshi_markets": {
+    "rows": 4404,
+    "min_ts": "2021-07-18 00:00:00+00",
+    "max_ts": "2026-11-17 14:00:00+00"
+  },
+  "kalshi_trades": {
+    "rows": 0,
+    "min_ts": null,
+    "max_ts": null
+  },
+  "ingest_state": {
+    "gamma_markets": {
+      "done": {
+        "units": 2922,
+        "rows": 5538585
+      }
+    },
+    "kalshi_markets": {
+      "done": {
+        "units": 503,
+        "rows": 4559
+      }
+    },
+    "pm_prices": {
+      "done": {
+        "units": 1,
+        "rows": 731
+      }
+    },
+    "pm_trades_taker": {
+      "done": {
+        "units": 11388,
+        "rows": 22456452
+      }
+    },
+    "pm_wallet_activity": {
+      "done": {
+        "units": 116,
+        "rows": 291656
+      },
+      "partial": {
+        "units": 61,
+        "rows": 610000
+      },
+      "pending": {
+        "units": 50834,
+        "rows": 0
+      },
+      "running": {
+        "units": 6,
+        "rows": 0
+      }
+    }
+  },
+  "in_scope_taker_trade_coverage": {
+    "markets": 9706,
+    "markets_done": 9706,
+    "volume_usd": 7760908539.235118,
+    "volume_usd_done": 7760908539.235118
+  }
+}

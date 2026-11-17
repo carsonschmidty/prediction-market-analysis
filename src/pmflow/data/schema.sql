@@ -140,8 +140,12 @@ CREATE TABLE IF NOT EXISTS pm_wallets (
     n_activity_rows     integer,
     n_markets           integer,     -- distinct markets touched (within fetched activity)
     first_activity_ts   timestamptz, -- earliest activity of any type returned by /v2/activity
-    first_trade_ts      timestamptz
+    first_trade_ts      timestamptz,
+    -- Data API history starts ~2023-11-18 (rolling ~3-year retention). TRUE when the wallet exits a position it
+    -- never bought/split inside the window, i.e. it was active before the window: first-seen is left-censored.
+    pre_window_activity boolean
 );
+ALTER TABLE pm_wallets ADD COLUMN IF NOT EXISTS pre_window_activity boolean;
 
 -- Per (wallet, market) aggregate of the wallet's activity; market_* columns filled by pmflow.data.derive.
 -- Point-in-time use: a feature at time t may only use rows with first_ts < t and, for PnL / win

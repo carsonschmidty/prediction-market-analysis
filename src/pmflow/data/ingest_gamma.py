@@ -64,7 +64,7 @@ def market_row(m: dict) -> tuple:
                       "seriesSlug": e.get("seriesSlug")} for e in (m.get("events") or [])]
     tax = classify(m.get("question"), ev.get("title"), [t.get("label") for t in tags if t.get("label")],
                    m.get("category"))
-    slim = tax["category"] in SLIM_CATEGORIES
+    slim = tax["category"] in SLIM_CATEGORIES  # also drops token ids, tag slugs, question id
     return (
         int(m["id"]), (m.get("conditionId") or None), m.get("questionID"), m.get("slug"), m.get("question"),
         None if slim else m.get("description"), json.dumps(jload(m.get("outcomes"))), json.dumps(jload(m.get("clobTokenIds"))),
