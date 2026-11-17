@@ -1,0 +1,86 @@
+{
+ "frozen_utc": "2026-11-17T23:40:29.494338+00:00",
+ "status": "frozen before any test metric of any candidate or control was computed by the evaluation agent",
+ "rows": "frozen prediction files, rows with split='test' (24h grid, is_live), in_scope and macro scored separately",
+ "primary": {
+  "universe": "in_scope",
+  "candidate": "lgbm_anchored",
+  "comparator": "ctrl_lgbm_price_only",
+  "metric": "paired delta Brier = loss(comparator) - loss(candidate), market-weighted",
+  "inference": "event-clustered bootstrap 95% CI (B=2000) + cluster-robust t over events",
+  "prereg_expectation": "delta <= 0 within CI (docs/modeling.md s8)"
+ },
+ "go_criteria": {
+  "1_brier": "lgbm_anchored beats BOTH raw price and ctrl_lgbm_price_only on in-scope test: market-weighted dBrier>0 with event-clustered 95% CI excluding 0; same sign under snapshot and event weighting; beats its own constant-shift (level-only) version; dBrier vs control > 0 on the bias-robust subset; sign not flipped by theatre-cluster inference / leave-one-theatre-out. A secondary candidate (stack_s1, ridge_flow) can only support GO with Holm-adjusted p<0.05 over the 3 candidate-vs-control tests and the same robustness checks.",
+  "2_calibration": "in-scope test, market-weighted: ECE(candidate) <= ECE(price)+0.01 and |calibration slope-1| <= 0.25",
+  "3_returns": "frozen-threshold flags, default costs (impact_coef 0.05, $100, latency 60s, fee 0, first signal per market+direction): in-scope test return per $ > 0 with event-clustered 95% CI lower bound > 0, above the price-only control and the rate-matched naive-YES control, and still > 0 (point) at 1% fees"
+ },
+ "window_selection_controls": {
+  "comparators": [
+   "raw price (Baseline A)",
+   "ctrl_lgbm_price_only",
+   "ctrl_shift_train: logit(price)+0.1111 (train-fitted intercept, stage2_selected ctrl_intercept)",
+   "level_only_<cand>: logit(price) + candidate's own mean test residual (label-free, per universe, market-weighted)",
+   "p_iso, p_platt (eval_baseline_preds, train-fitted)"
+  ],
+  "bias_robust_subset": "markets with scheduled end_date <= 2026-11-10 (data end - 7d): inclusion does not depend on closing early; sensitivity margin 21d; complement reported descriptively",
+  "diag_breakdown": "time from cutoff to event_close buckets (uses the future; diagnostic only)"
+ },
+ "coarse_clusters": "topic (10 in-scope / 10 macro) and theatre (8/9) from pmflow.evaluation.topics (text rules); cluster bootstrap + cluster-robust t with G-1 df + leave-one-theatre-out; with G<=10 these are indicative only",
+ "secondary_exploratory": [
+  "stack_s1",
+  "ridge_flow",
+  "all macro results",
+  "breakdowns by geo_subtype / price bucket / month",
+  "flag precision",
+  "pat_* and s1_informed_score",
+  "tradability sensitivity grid",
+  "reported cases"
+ ],
+ "mde": "2.80 x clustered SE of each candidate's own paired delta (alpha .05 two-sided, power .8)",
+ "tradability": {
+  "default": {
+   "impact_coef": 0.05,
+   "stake": 100,
+   "latency_s": 60,
+   "fee_bps": 0,
+   "dedupe": "first_per_market"
+  },
+  "grid": {
+   "impact_coef": [
+    0,
+    0.05,
+    0.1,
+    0.2
+   ],
+   "fee_bps": [
+    0,
+    50,
+    100,
+    200
+   ],
+   "latency_s": [
+    60,
+    3600,
+    21600
+   ],
+   "stake": [
+    10,
+    100,
+    1000,
+    10000
+   ],
+   "dedupe": [
+    "first_per_market",
+    "first_per_event",
+    "all"
+   ]
+  },
+  "controls": [
+   "ctrl_lgbm_price_only at its frozen 0.05",
+   "naive YES at the candidate's flag rate (20 random draws)",
+   "buy YES at every market's first test snapshot"
+  ]
+ },
+ "no_tuning": "no thresholds, models or variants are changed after scoring; test is scored once"
+}

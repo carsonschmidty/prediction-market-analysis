@@ -1,0 +1,10 @@
+model,split,n,max_abs_diff,mean_abs_diff
+lgbm_anchored,train,115252,0.0,0.0
+lgbm_anchored,val,13516,0.0,0.0
+lgbm_anchored,test,34228,0.0,0.0
+ctrl_lgbm_price_only,train,115252,0.0,0.0
+ctrl_lgbm_price_only,val,13516,0.0,0.0
+ctrl_lgbm_price_only,test,34228,0.0,0.0
+ridge_flow,train,115252,0.0,0.0
+ridge_flow,val,13516,0.0,0.0
+ridge_flow,test,34228,0.0,0.0

@@ -1,0 +1,13 @@
+universe,split,level,n_clusters,share_snap_in_train_cluster,share_evt_in_train_cluster,largest_cluster,largest_cluster_share
+in_scope,val,topic,10,1.0,1.0,iran_gulf,0.5379889782274822
+in_scope,val,theatre,8,1.0,1.0,middle_east,0.612611798717138
+in_scope,val,template,201,0.22766284217183125,0.2087912087912088,us x iran diplomatic meeting by,0.030264703225223597
+in_scope,test,topic,10,1.0,1.0,iran_gulf,0.3660143089677102
+in_scope,test,theatre,8,1.0,1.0,middle_east,0.564106446606352
+in_scope,test,template,365,0.07832077828670932,0.07116104868913857,how many ships transit the strait of hormuz week of,0.02611954423288034
+macro,val,topic,8,1.0,1.0,macro_fed,0.3682059664895791
+macro,val,theatre,8,1.0,1.0,macro_us_rates,0.3682059664895791
+macro,val,template,34,0.7919901920719248,0.6382978723404256,bank of brazil decision in,0.08581937065794851
+macro,test,topic,10,1.0,1.0,macro_fed,0.2525924977595698
+macro,test,theatre,9,1.0,1.0,macro_us_rates,0.4955831519651773
+macro,test,template,39,0.791575982588657,0.7127659574468085,how high will year treasury yield go in,0.09179362437588016

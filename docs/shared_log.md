@@ -194,3 +194,24 @@ Build: `.venv/bin/python -m pmflow.evaluation.snapshots` (idempotent, ~1 min). T
   `artifacts/data/market_counts_by_year*.csv` are the record. Rebuilding needs a full Gamma metadata re-ingest.
 - A future `ingest_gamma --resume` only adds newly closed markets (all categories); re-trim if disk gets tight.
 - Maker-fills stage started (3 workers, alongside the wallets stage); it still stops below 8 GB free.
+
+## [2026-11-17 23:55 UTC] evaluation — FINAL: test scored once; verdict NO-GO (docs/go_no_go_report.md)
+- Audit before scoring (artifacts/evaluation/final/audit_*): no leakage found. A fresh 80-snapshot truncated-DB
+  reproduction of feat_snapshot_features shows only `full_*` build-time drift (not model inputs), plus a $0-PnL
+  float tie in dom_winrate. Train-only refits reproduce every frozen val/test prediction exactly. All role filters
+  hold, so maker rows changed no stored input. Prereg files, counts, thresholds and hashes match docs/modeling.md.
+- FINDING (modeling code, not fixed): OffsetLogit standardises with the train mean, so the "no-intercept"
+  stack_s1 carries an implicit +0.049 logit YES constant (ridge_flow +0.009).
+- Window-selection bias confirmed on test: in-scope YES-excess +0.026 overall, +0.006 in markets with
+  end_date <= 2026-11-10, +0.216 in markets ending after the window. Macro +0.086 / +0.045 / +0.281.
+- Plan frozen 23:40:29Z (analysis_plan.json); test scored 23:46:53Z.
+- PRIMARY (in-scope, lgbm_anchored - price-only control, market-weighted): dBrier -0.0004 [-0.0011, +0.0003],
+  p = 0.28 (MDE 0.0010). vs raw price +0.0014 [+0.0006, +0.0022], but the control alone gives +0.0018.
+  stack_s1 - control +0.0005 [-0.0000, +0.0010] (Holm p = 0.14). ridge_flow - price +0.0001 (MDE 0.0002).
+  Macro: lgbm - control -0.0023 [-0.0050, +0.0003].
+- Calibration OK (in-scope ECE 0.028 vs price 0.036). All test flags are YES flags; in-scope excess precision
+  +0.016 [-0.08, +0.12].
+- Trading at the frozen thresholds, default costs: in-scope -6.4%/$ [-21.5%, +8.9%] (control -6.3%, naive YES -23%).
+  No cost variant is positive in-scope. Macro positives are a YES-heavy regime (the control and naive YES are
+  positive too).
+- pat_* / s1_informed_score on test: tiny counts, excess CIs about +/-0.1, nothing detectable.

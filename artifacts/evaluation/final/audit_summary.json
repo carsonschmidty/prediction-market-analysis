@@ -1,0 +1,110 @@
+{
+ "run_utc": "2026-11-17T23:39:53.235289+00:00",
+ "note": "no test metric computed in this module",
+ "model_inputs": {
+  "candidate_feature_counts": {
+   "lgbm_anchored": 75,
+   "ctrl_lgbm_price_only": 1,
+   "ridge_flow": 6
+  },
+  "forbidden_in_candidate_features": {
+   "lgbm_anchored": [],
+   "ctrl_lgbm_price_only": [],
+   "ridge_flow": []
+  },
+  "raw_columns_used_by_engineering": [
+   "category",
+   "concat",
+   "dom_24h",
+   "geo_subtype",
+   "hours_since_first_trade",
+   "hours_since_open",
+   "index",
+   "last_trade_age_h",
+   "max_trade_24h",
+   "n_new_wallets_dom_24h",
+   "n_trades_total",
+   "n_wallets_total",
+   "neg_risk",
+   "price_yes",
+   "universe",
+   "vwap_24h",
+   "{c}_24h"
+  ],
+  "forbidden_raw_refs": [],
+  "forbidden_cols_in_model_frame": [
+   "y",
+   "full_cov_share_1h",
+   "full_cov_share_6h",
+   "full_cov_share_24h",
+   "full_cov_share_72h",
+   "fws72_full_1h",
+   "fws72_full_6h",
+   "fws72_full_24h",
+   "fws72_full_72h",
+   "dom_log_prior_mkts_full_1h",
+   "dom_log_prior_mkts_full_6h",
+   "dom_log_prior_mkts_full_24h",
+   "dom_log_prior_mkts_full_72h"
+  ],
+  "hours_to_end_in_frame": true,
+  "hours_to_end_in_any_candidate": false
+ },
+ "splits": {
+  "invariants": {
+   "cutoff_not_on_6h_grid": 0,
+   "cutoff_not_before_close": 0,
+   "last_trade_not_before_cutoff": 0,
+   "train_event_closes_after_train_end": 0,
+   "val_cutoff_outside_period": 0,
+   "test_cutoff_before_test_start": 0,
+   "event_in_two_scored_splits": 0,
+   "live_price_outside_band": 0
+  },
+  "pred_rows_missing_in_db": 0,
+  "pred_split_mismatch": 0,
+  "pred_rows_purged": 0,
+  "pred_rows_not_live": 0,
+  "feat_rows_purged_test": 0,
+  "events_in_two_scored_splits_all_rows": 0,
+  "train_markets_closing_after_2026_04_01": 0
+ },
+ "maker": {
+  "role_counts": {
+   "0": 22456369,
+   "1": 4809145
+  },
+  "test_markets_with_maker_rows": 11,
+  "n_checked": 300,
+  "taker_count_mismatch": 0,
+  "snapshots_whose_market_now_has_maker_rows_before_cutoff": 2,
+  "mismatch_if_role_not_filtered": 2
+ },
+ "text_hits": 29,
+ "refit": {
+  "refit_rows": {
+   "n_train_rows": 115252,
+   "n_train_events": 2169,
+   "max_train_cutoff": "2026-03-31 00:00:00+00:00",
+   "max_train_event_close": "2026-03-31 20:26:27+00:00"
+  },
+  "ridge_flow_implicit_constant_logit": 0.009062240929565675,
+  "ridge_flow_mean_abs_resid_test": 0.02664665544546799,
+  "z_s1_max_abs_diff_val": 0.0,
+  "z_lgbm_max_abs_diff_val": 0.0,
+  "z_s1_max_abs_diff_test": 0.0,
+  "z_lgbm_max_abs_diff_test": 0.0,
+  "stack_resid_fit": {
+   "const": 0.04923030028027114,
+   "b_lgbm": 1.0957592028794645,
+   "b_s1": 0.3329175557174747,
+   "max_abs_err": 1.2709363872431823e-07
+  }
+ },
+ "features": {
+  "n": 80,
+  "rows_with_trunc_only_diffs": 2,
+  "rows_any_diff_trunc": 48,
+  "rows_any_diff_full": 48
+ }
+}
