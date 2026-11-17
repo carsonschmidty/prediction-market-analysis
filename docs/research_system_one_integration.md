@@ -6,13 +6,13 @@ Research report, 2026-11-17. Scope: the open-source "system one" classifier, how
 
 ## 1. Recommendation
 
-Build a **market-anchored stacking model**. The final log-odds equal the market's log-odds plus small, ridge-shrunk corrections from two components. One is a heavily constrained LightGBM on point-in-time wallet, flow, price-impact and timing features; it owns every raw number. The other is a small open "system one" encoder that reads only text context (market question, event type, recent headlines) plus a few coarse, verbalised flow descriptors, never raw trade tables. Fit the corrections with logistic regression on out-of-fold, walk-forward predictions, so the default answer is "the market is right" and the components must earn any weight they get. This combines options (a) and (d) in Section 6. Use gating (c) only as an interaction term and to save compute, and reject (b). For the CPU prototype the system one model is **`tasksource/tasksource-decider-nano`**. It is Apache-2.0, has 149M parameters and an 8k-token ModernBERT/Ettin backbone, uses the Jev-style typed `noul`/`choice` interface, and is the best-calibrated open-licence decision model under 300M parameters on the public Decision Index board. Use it zero-shot first and fine-tune it only if out-of-fold log loss improves. The fallback is `knowledgator/gliclass-instruct-edge-v1.0` (32.7M, Apache-2.0). With a GPU, use `knowledgator/gliclass-v4-edge` (440M, Apache-2.0). Expect most of the measurable edge, if there is any, to come from LightGBM and timing features rather than from the transformer. The closest published evidence finds that order-flow models struggle to beat the Polymarket price itself (OpenMarket, arXiv 2607.26245), and that a learned pooling gate largely defers to market prices (arXiv 2609.12101). Plan a go/no-go test against the market-only baseline, not an absolute accuracy target.
+Build a **market-anchored stacking model**. The final log-odds equal the market's log-odds plus small, ridge-shrunk corrections from two components. One is a heavily constrained LightGBM on point-in-time wallet, flow, price-impact and timing features; it owns every raw number. The other is a small open "system one" encoder that reads only text context (market question, event type, recent headlines) plus a few coarse, verbalised flow descriptors, never raw trade tables. Fit the corrections with logistic regression on out-of-fold, walk-forward predictions, so the default answer is "the market is right" and the components must earn any weight they get. This combines options (a) and (d) in Section 6. Use gating (c) only as an interaction term and to save compute, and reject (b). For the CPU prototype, **fine-tune `knowledgator/gliclass-instruct-edge-v1.0`**. It is Apache-2.0, has 32.7M parameters on an Ettin-32m ModernBERT backbone with about 8k context, and follows instructions over arbitrary labels. Its backbone measured about 2.6 s per 8-example training step at 256 tokens on this box, or roughly 27 minutes per epoch over 5,000 windows, with a peak of about 2 GB RAM. Alongside it, run **`tasksource/tasksource-decider-nano`** (Apache-2.0, 149M, Jev-style typed `noul`/`choice` interface) **zero-shot, inference only**, as the comparison scorer. It has the lowest out-of-the-box ECE of any sub-300M model on the public Decision Index board (0.070). Fully fine-tuning it on this box measured about 3 hours per epoch over 5,000 windows, which is too slow for multi-fold, multi-seed work in two weeks. With a GPU, fine-tune `tasksource/tasksource-decider-nano` fully, or move up to `knowledgator/gliclass-v4-edge` (440M, Apache-2.0). Expect most of the measurable edge, if there is any, to come from LightGBM and timing features rather than from the transformer. The closest published evidence finds that order-flow models struggle to beat the Polymarket price itself (OpenMarket, arXiv 2607.26245), and that a learned pooling gate largely defers to market prices (arXiv 2609.12101). Plan a go/no-go test against the market-only baseline, not an absolute accuracy target.
 
 ---
 
 ## 2. How to read this report (evidence quality and access limits)
 
-- **Network limits during this review.** Only `huggingface.co` could be opened. Fetches of other hosts (typesafe.ai, openrouter.ai, docs.aimlapi.com, inovex.de, deeplearning.ai) failed at DNS/proxy, and the GitHub tool refused repositories outside this project. Every source in Section 13 was opened. Papers were read as their **abstracts only**, through the Hugging Face papers index (`huggingface.co/api/papers/<arXiv id>`). Claims that rest on full-text details are marked as such or avoided.
+- **Network limits during this review.** Only `huggingface.co` could be opened. Fetches of other hosts (typesafe.ai, openrouter.ai, docs.aimlapi.com, inovex.de, deeplearning.ai) failed at DNS/proxy, and the GitHub tool refused repositories outside this project. The Hugging Face weight CDN (Xet/`cdn.hf.co`) was also blocked, so no model weights could be downloaded. CPU timings in Section 4.3 therefore use random-initialised models built from the published configs, and no accuracy was measured locally. Every source in Section 13 was opened. Papers were read as their **abstracts only**, through the Hugging Face papers index (`huggingface.co/api/papers/<arXiv id>`). Claims that rest on full-text details are marked as such or avoided.
 - **Web-search-only material** (platform terms, CFTC actions, the VPIN/PIN and options-insider literature, press coverage of Polymarket insider cases) was seen only as search-engine summaries and could not be opened. It is listed separately in Section 14 as *unverified leads*, not as sources. Every claim that depends on it is tagged **[unverified]**.
 - Tags used below: **[measured]** = numbers from an opened dataset or model card; **[abstract]** = stated in an opened paper abstract; **[standard practice]** = well-established method knowledge not re-sourced here; **[speculative]** = our judgement with thin or no direct evidence.
 
@@ -43,8 +43,8 @@ Licence, size and context come from the Hugging Face API and `config.json`. "DI 
 
 | Model ID | Licence | Params | Max context (tokens) | Type | DI public skill | DI ECE | GPU median latency | CPU fine-tune on 4 cores / 15 GB | Notes |
 |---|---|---|---|---|---|---|---|---|---|
-| **`tasksource/tasksource-decider-nano`** | Apache-2.0 | 149M | 7,999 pos. (card: pairs up to 8,192) | Joint cross-encoder on `cross-encoder/ettin-reranker-150m-v1`; Jev-style `choice`/`noul` | 33.5 | **0.070** | 13 ms | Feasible with short inputs (see 4.3) | Card claims #1 under 300M on DI 0.4 Full. Custom `decider.py` (PyTorch + transformers only). Overconfident in the top bin (0.976 confidence vs 0.910 accuracy). |
-| `knowledgator/gliclass-instruct-edge-v1.0` | Apache-2.0 | 32.7M | 7,999 (Ettin-32m) | GLiClass uni-encoder, prompt + labels | not on board | n/a | n/a | Easy | Smallest credible instruction-following option. Supports few-shot examples and label descriptions. |
+| **`tasksource/tasksource-decider-nano`** | Apache-2.0 | 149M | 7,999 pos. (card: pairs up to 8,192) | Joint cross-encoder on `cross-encoder/ettin-reranker-150m-v1`; Jev-style `choice`/`noul` | 33.5 | **0.070** | 13 ms | Inference OK (~0.9 s/window). Full fine-tune ~3 h per epoch per 5k windows (backbone measured, 4.3) | Card claims #1 under 300M on DI 0.4 Full. Custom `decider.py` (PyTorch + transformers only). Overconfident in the top bin (0.976 confidence vs 0.910 accuracy). |
+| `knowledgator/gliclass-instruct-edge-v1.0` | Apache-2.0 | 32.7M | 7,999 (Ettin-32m) | GLiClass uni-encoder, prompt + labels | not on board | n/a | n/a | **Yes**: backbone measured ~27 min per epoch per 5k windows at 256 tokens, 2 GB RAM | **Recommended CPU fine-tune target.** Smallest credible instruction-following option. Supports few-shot examples and label descriptions. |
 | `knowledgator/gliclass-edge-v3.0` | Apache-2.0 | 32.7M | 7,999 | GLiClass | not on board | n/a | n/a | Easy | Older; LoRA-trained on logic tasks (card). |
 | `knowledgator/gliclass-v4-edge` | Apache-2.0 | 440M | DeBERTa-v3-large (512 abs. config; card runs `max_length` 2,048 to 16,384) | GLiClass v4, ships a Jev-compatible server | 47.5 (card) | not listed (v4.1: 0.118, *under*-confident) | 11 ms (card), 21.6 ms (v4.1 board) | Slow but possible with LoRA; better on GPU | Card: "Scores are calibrated on held-out data". `gliclass-v4.1-edge` has **no licence in its metadata** and a 15-byte README, so avoid it until clarified. |
 | `fastino/GLiDE-0.4B` | **Fastino Community License** (custom) | 395M | 7,999 | Ettin-400m encoder, 255-way decision readout | 51.1 | **0.049** | 18 ms | Possible, slow | Best-calibrated small model on the board. The licence requires a commercial agreement for production commercial use by entities with revenue above $10M, "Built with Fastino GLiDE" attribution for any commercial use, and **share-alike for fine-tunes** (derivatives inherit these terms). It counts "internal operations of a for-profit entity" as commercial use. Research use is allowed. |
@@ -67,21 +67,62 @@ Other notes:
 - The strongest sub-1B entries on the board (`chiranko/PKU-KCL-Meteor-0.8B`, `Valen-Team/Valen-Decision-1.5-0.8B`, `fastino/GLiDE-0.8B`) are **autoregressive Qwen3.5-0.8B decoders used as scorers**. They fall outside the "non-autoregressive" brief and are not considered further.
 - **Calibration ranking among small open models (zero-shot, generic tasks):** GLiDE-0.4B (0.049) < tasksource-decider-nano (0.070) < Jev (0.080) < GLiNER2.5-Decide (0.088) < GLiClass v4.1 edge (0.118) [measured]. Treat this as a tiebreaker only. After fine-tuning on our data, calibration must be re-estimated from scratch.
 
-### 4.2 Why `tasksource/tasksource-decider-nano` for the CPU prototype
+### 4.2 Choice for the CPU prototype
+
+**Fine-tuned model: `knowledgator/gliclass-instruct-edge-v1.0`.**
 
 1. **Licence.** Apache-2.0, with no share-alike or revenue-threshold clauses. GLiDE-0.4B is better calibrated, but its licence would bind any fine-tune we make.
-2. **Fit to the brief.** It is non-autoregressive, follows the Jev `state`/`questions` interface, and returns softmax probabilities over the supplied options. A `noul` question ("Will this market resolve YES?" or "Is this window informed flow?") maps directly to our binary targets.
-3. **Long context.** About 8k tokens is enough for a market description, resolution rules and several headlines, which the 512-token DeBERTa models cannot fit.
-4. **Size.** At 149M parameters it is the largest model we expect to fine-tune comfortably on 4 CPU cores (Section 4.3). Its card describes encoding the state once per request through a tree attention mask, which keeps multi-question inference cheap.
-5. **Risk.** It uses custom inference code (`decider.py`). Pin the revision and read the code before running it, because it executes Python from the repository.
+2. **Fit to the brief.** It is a non-autoregressive GLiClass encoder. It scores every supplied label in one pass, accepts a task prompt, label descriptions and few-shot examples, and can be exposed through the Jev-style `/v1/systemone` wrapper published in the `gliclass-v4-edge` card.
+3. **Context.** Its Ettin-32m backbone has 7,999 positions, which leaves room for resolution rules and headlines.
+4. **CPU cost.** Measured on its backbone (Section 4.3), it is the only candidate where 3 epochs × 3 seeds × 5 walk-forward folds on about 5,000 windows fits in roughly 3 to 4 days of a 4-core box.
+5. **Gap.** It has no Decision Index entry, so its zero-shot calibration is unmeasured. That matters little because we recalibrate after fine-tuning.
 
-**Fallbacks.** Use `knowledgator/gliclass-instruct-edge-v1.0` (32.7M) if 149M is too slow. If typed-decision pretraining turns out not to matter after fine-tuning, use `jhu-clsp/ettin-encoder-68m` with a plain classification head.
+**Zero-shot comparator: `tasksource/tasksource-decider-nano`.**
 
-**With a GPU.** Use `knowledgator/gliclass-v4-edge` (440M, Apache-2.0, a Jev-compatible server is in the card) and fine-tune it fully or with LoRA. Use `fastino/GLiDE-0.4B` only after legal review of the Fastino Community License. A GPU also makes it practical to run several seeds and nested cross-validation for the transformer, which matters more than model size when only about 100 positives exist.
+- It has the lowest ECE (0.070) of any sub-300M model on the board, an Apache-2.0 licence, and the Jev `state`/`questions` interface. A `noul` question ("Will this market resolve YES?" or "Is this window informed flow?") maps directly to our binary targets.
+- It is used inference-only on CPU (about 0.9 to 1.4 s per window at 256 to 512 tokens).
+- It uses custom code (`decider.py`). Pin the revision and read the code before running it.
+- If its zero-shot signal is clearly better than the fine-tuned 32M model, a cheap middle ground on CPU is to train only a logistic head on its frozen output logit or pooled embedding.
+
+**Alternative.** `MoritzLaurer/deberta-v3-xsmall-zeroshot-v1.1-all-33` (MIT, 70.8M, NLI framing) is about 1.5 times the cost of the 32M model at 256 tokens, but is limited to 512 tokens.
+
+**With a GPU.**
+
+- Fully fine-tune `tasksource/tasksource-decider-nano`.
+- Or use `knowledgator/gliclass-v4-edge` (440M, Apache-2.0, Jev-compatible server in its card) with full fine-tuning or LoRA.
+- Use `fastino/GLiDE-0.4B` only after legal review of the Fastino Community License.
+- A GPU mainly buys more seeds and nested cross-validation, which matter more than model size with about 100 positives.
 
 ### 4.3 CPU feasibility on this box (4 cores, 15 GB, no GPU)
 
-CPU_BENCH_PLACEHOLDER
+**[measured on this box, 2026-11-17]**
+
+- Setup: PyTorch 2.15 (CPU), transformers 4.57.1, 4 threads, fp32.
+- Each model was built from its published `config.json` with a binary sequence-classification head and **random weights**, because the weight CDN was blocked by the proxy. Compute cost does not depend on weight values, so the timings stand, but no accuracy was measured.
+- Inputs were padded to full length. The training step is forward, backward and AdamW on a batch of 8. "Epoch" assumes 5,000 windows.
+- The `gliclass` wrapper and the `decider` heads add label or option tokens and a small head, so expect somewhat higher real cost [speculative].
+
+| Backbone (stands in for) | Params | Seq | Inference, 1 window | Train step, batch 8 | Epoch, 5k windows | Peak RSS |
+|---|---|---|---|---|---|---|
+| `jhu-clsp/ettin-encoder-32m` (gliclass-instruct-edge) | 32M | 256 | 0.23 s | 2.6 s | ~27 min | 2.0 GB |
+| same | 32M | 512 | 0.49 s | 4.6 s | ~48 min | 2.5 GB |
+| `jhu-clsp/ettin-encoder-68m` | 68M | 256 | 0.75 s | 9.7 s | ~101 min | 3.3 GB |
+| same | 68M | 512 | 0.95 s | 14.4 s | ~150 min | 4.8 GB |
+| `cross-encoder/ettin-reranker-150m-v1` (tasksource-decider-nano) | 150M | 256 | 0.93 s | 18.2 s | ~190 min | 5.3 GB |
+| same | 150M | 512 | 1.39 s | 24.2 s | ~252 min | 7.8 GB |
+| `microsoft/deberta-v3-xsmall` (MoritzLaurer xsmall zero-shot) | 71M | 256 | 0.36 s | 3.9 s | ~41 min | 4.2 GB |
+| same | 71M | 512 | 0.83 s | 7.4 s | ~77 min | 6.5 GB |
+| `microsoft/deberta-v3-base` (deberta-base zero-shot, gliclass-instruct-base) | 184M | 256 | 0.43 s | 7.5 s | ~78 min | 7.6 GB |
+| `microsoft/deberta-v3-base` at 512; `microsoft/deberta-v3-large` (gliclass-v4-edge, GLiNER2.5-Decide) | 184M / 435M | 512 | did not finish within the 15-minute per-run timeout | | | |
+
+**Reading the table.**
+
+- On this box, ModernBERT-family encoders were *slower* per parameter than DeBERTa-v3. They are designed for GPU efficiency ([abstract] 2412.13663), and those kernels are not available on CPU.
+- Full fine-tuning of 150M models is possible within 15 GB of RAM, but each epoch takes hours. Five folds × three seeds × three epochs comes to roughly 140 CPU-hours.
+- The 32M model is the realistic fine-tune target. Anything at 440M or above is GPU territory.
+- Keep inputs at 256 tokens or fewer where possible: about 30 to 40 words of descriptors plus 3 to 5 headlines.
+
+**Batch scoring cost.** Zero-shot scoring of 50,000 windows with the 150M model takes about 13 to 19 CPU-hours. The 32M model needs about 3 hours for the same job. For the meta-model training set, score all positives and a uniform sample of negatives, and reweight for the sampling. Never score only gate-flagged windows (Section 6.2).
 
 ---
 
@@ -135,7 +176,7 @@ logit p_final = logit(p_mkt) + β0 + β1·z_lgbm + β2·z_s1 + β3·z_lgbm·1[ga
 2. **Windowing.** For each market and each decision timestamp *t*, build a trade window ending at *t*, and freeze the market mid price, spread and depth at *t*.
 3. **Feature store** (owned by `features/`). Point-in-time wallet features (age, prior trade count, prior markets, funding-source cluster ID treated as opaque), flow features (signed volume, imbalance, bet size relative to depth, burstiness), price-impact features and timing features (time to scheduled events, time since last headline).
 4. **Component A, LightGBM.** Reads the features and outputs `p_lgbm` (resolution, or informed-window probability), then calibrates it with Platt scaling on its own out-of-fold predictions.
-5. **Component B, system one.** Reads the rendered `state` (text context plus five verbalised descriptors) and one `noul` question, outputs `p_s1`, then calibrates it with temperature or Platt scaling on its own out-of-fold predictions.
+5. **Component B, system one** (CPU: fine-tuned `gliclass-instruct-edge-v1.0`, with zero-shot `tasksource-decider-nano` as comparator). Reads the rendered `state` (text context plus five verbalised descriptors) and one `noul` question, outputs `p_s1`, then calibrates it with temperature or Platt scaling on its own out-of-fold predictions.
 6. **Market prior.** `p_mkt` at *t*, using the mid price; executable bid/ask is used for the trading simulation.
 7. **Meta-model.** The shrunk logistic stacker from 6.2 outputs `p_final`. A Venn-Abers wrapper adds an interval `[p0, p1]` as an "insufficient evidence" flag.
 8. **Evaluation and simulation** (owned by `evaluation/`). Walk-forward scoring against the market-only baseline, plus a fee- and slippage-aware paper-trading simulation. No live orders.
@@ -148,7 +189,7 @@ logit p_final = logit(p_mkt) + β0 + β1·z_lgbm + β2·z_s1 + β3·z_lgbm·1[ga
 |---|---|---|
 | System one, after fine-tuning | **Temperature scaling** (1 parameter) or Platt scaling (2 parameters) on out-of-fold logits | Temperature scaling is "surprisingly effective" for modern neural nets ([abstract] 1706.04599). Pretrained transformers are fairly calibrated in-domain and temperature scaling improves this further, while label smoothing helps out-of-domain ([abstract] 2003.07892). Low parameter count suits the small sample. |
 | LightGBM | **Platt scaling** on out-of-fold scores | Two parameters. Isotonic regression and histogram binning are sample-hungry: binning needs O(B/ε²) samples against O(1/ε²) for scaling methods, but scaling methods can be *less calibrated than reported* ([abstract] 1909.10155). A large post-hoc calibration benchmark finds **smooth calibration functions outperform binning-based ones** ([abstract] 2605.30188). |
-| Final output | The meta-model is itself a logistic (Platt-type) recalibration. Add an **inductive Venn-Abers** wrapper once more than about 300 resolved outcomes exist | Venn-Abers predictors give calibration guarantees under minimal assumptions for transformer outputs ([abstract] 2205.10586). The width of the `[p0, p1]` interval is a useful "do not trade" signal when data is thin [standard practice]. |
+| Final output | The meta-model is itself a logistic (Platt-type) recalibration. Add an **inductive Venn-Abers** wrapper once more than about 300 resolved outcomes exist (the threshold is our judgement [speculative]) | Venn-Abers predictors give calibration guarantees under minimal assumptions for transformer outputs ([abstract] 2205.10586). The width of the `[p0, p1]` interval is a useful "do not trade" signal when data is thin [standard practice]. |
 | Isotonic | Avoid until there are at least ~1,000 calibration points per stratum | It is step-shaped, overfits small samples and outputs probabilities of exactly 0 or 1 [standard practice; consistent with 1909.10155 and 2605.30188]. |
 
 **Class imbalance.** Do not oversample positives before calibration. If class weights or negative subsampling are used to train LightGBM or system one, correct the logit back to the true base rate (subtract the log of the sampling ratio) *before* stacking [standard practice]. Report calibration on the natural class distribution of each time fold. With dozens to hundreds of positives, binned ECE is very noisy. Prefer **log loss, Brier score and its reliability/resolution decomposition**, and reliability curves with bootstrap bands clustered by event. Report ECE only alongside its confidence interval.
@@ -273,9 +314,9 @@ logit p_final = logit(p_mkt) + β0 + β1·z_lgbm + β2·z_s1 + β3·z_lgbm·1[ga
 | 2 | Point-in-time window builder using settled fills and ground-truth aggressor direction. Capture market mid, spread and depth at *t*. | Unit test showing no field is later than *t*. |
 | 3 | Walk-forward, event-grouped fold generator with purge and embargo. Market-only baseline metrics per fold. | Baseline log loss and Brier score per fold. |
 | 4 to 5 | LightGBM with ≤ 25 features, constrained, out-of-fold Platt calibration. TabPFN-v2 / TabICL as side baselines on the same folds. | Out-of-fold `p_lgbm`. Paired log-loss difference against the market. |
-| 6 | Render the system one `state` text (context plus ≤ 5 descriptors). Run **zero-shot** `tasksource/tasksource-decider-nano` with one `noul` question on all windows. Time it. | Out-of-fold zero-shot `p_s1` and its log-loss difference against the market. |
-| 7 to 8 | Fine-tune system one on proxy target (ii) using time-forward folds, 3 seeds, ≤ 3 epochs, input ≤ 512 tokens. Fall back to `gliclass-instruct-edge-v1.0` if throughput is too low. | Fine-tuned out-of-fold `p_s1`. Keep it only if it beats zero-shot on validation log loss. |
-| 9 | Ablations: text only versus text plus descriptors; system one on all windows versus gated. | Ablation table. |
+| 6 | Render the system one `state` text (context plus ≤ 5 descriptors, ≤ 256 tokens). Run **zero-shot** `tasksource/tasksource-decider-nano` (one `noul` question) and zero-shot `gliclass-instruct-edge-v1.0` on all positives and a sample of negatives, in the background overnight. | Zero-shot `p_s1` for both models and their log-loss differences against the market. |
+| 7 to 9 | Fine-tune `knowledgator/gliclass-instruct-edge-v1.0` on proxy target (ii): time-forward folds, 3 seeds, ≤ 3 epochs, 256 tokens. This is about 3 to 4 CPU-days, so start it on day 7 and run day 9's ablations as reduced single-seed jobs. | Fine-tuned out-of-fold `p_s1`. Keep it only if it beats both zero-shot scorers on validation log loss. |
+| 9 (in parallel) | Single-seed ablations: text only versus text plus descriptors; meta-model with and without the gate interaction. | Ablation table. |
 | 10 | Market-anchored shrunk stacker (Section 6.2). Coefficients with bootstrap confidence intervals. | `β` estimates and intervals; check whether `β2` is distinguishable from 0. |
 | 11 | Calibration report: reliability curves, Brier decomposition, Venn-Abers intervals if n allows. | Calibration section. |
 | 12 | Paper-trading simulation with executable prices, fees, depth-capped size and deflated statistics. | Simulated profit and loss with sensitivity to fees and slippage. |
@@ -289,7 +330,7 @@ logit p_final = logit(p_mkt) + β0 + β1·z_lgbm + β2·z_s1 + β3·z_lgbm·1[ga
 | 1 | **No edge over the market.** Published evidence says this is the likely outcome (2607.26245, 2609.12101). | The market-anchored design makes "no edge" a clean, cheap finding. Pre-register the go/no-go rule. Concentrate effort on thin, slow-to-update markets where the market prior is weakest [speculative]. |
 | 2 | **Label scarcity and outcome-selected labels** (models learn "long-shot won"). | Proxy-target pretraining, positive-unlabelled framing, and weak-supervision rules kept separate from the resolution target. Evaluate with documented cases excluded. |
 | 3 | **Temporal leakage** through wallet history, edited metadata, backdated news or contaminated pretrained models. | Point-in-time feature tests, event-grouped purged walk-forward folds, first-seen news timestamps, and a title-only contamination check for system one. |
-| 4 | **System one overfits or adds nothing** at about 100 positives on CPU. | Zero-shot first. Fine-tune only on the abundant proxy target. Use 3 seeds and temperature scaling, and drop the component if `β2` is about 0. Most of the budget goes to LightGBM and evaluation. |
+| 4 | **System one overfits, adds nothing, or is too slow** at about 100 positives on a 4-core CPU (150M models measured at about 3 h per epoch per 5k windows). | Zero-shot first. Fine-tune only the 32M model, only on the abundant proxy target, at ≤ 256 tokens. Use 3 seeds and temperature scaling, and drop the component if `β2` is about 0. Most of the budget goes to LightGBM and evaluation. Request a GPU before scaling to 150M to 440M models. |
 | 5 | **Compliance and licence exposure** (platform insider rules, CFTC posture, model licences such as the Fastino Community License, TabPFN-3.5's non-commercial terms, CC-BY-NC decision models). | Research and paper trading only. No wallet naming. Counsel review of Section 11 before any live use. Restrict the model shortlist to Apache-2.0, MIT and BSD components. |
 
 ---
@@ -312,6 +353,7 @@ Hugging Face model cards and API records (licence, size, context, card claims):
 - https://huggingface.co/answerdotai/ModernBERT-base (README) and API record; API record for `answerdotai/ModernBERT-large`
 - API records: `microsoft/deberta-v3-xsmall`, `microsoft/deberta-v3-small`, `microsoft/deberta-v3-base`, `cross-encoder/nli-deberta-v3-small`, `cross-encoder/ettin-reranker-150m-v1`, `facebook/bart-large-mnli`, `BAAI/bge-reranker-v2-m3`, `chandar-lab/NeoBERT`, `EuroBERT/EuroBERT-210m`, `ProsusAI/finbert`, `urchade/gliner_multi-v2.1`, `tardellirs/crivo-150m`, `MLukauskas/amber-0.4b-v2`, `Horizon-Labs/multilingual-zeroshot-small`, `Elfsong/jev-ettin-150m-v16`, `shreyanbr/system-one-zeroshot`, `leobitz/jev-berta-base-zeroshot-classifier`, `mohameddhameem/systemone-jev-qp`, `jingang/TabICL-clf`, `jingang/TabICL`
 - https://huggingface.co/Prior-Labs/tabpfn_3_5 (README with licence gating text), https://huggingface.co/Prior-Labs/TabPFN-v2-clf (README)
+- `config.json` files used for the CPU timings: https://huggingface.co/jhu-clsp/ettin-encoder-32m, https://huggingface.co/jhu-clsp/ettin-encoder-68m, https://huggingface.co/cross-encoder/ettin-reranker-150m-v1, https://huggingface.co/microsoft/deberta-v3-xsmall, https://huggingface.co/microsoft/deberta-v3-base, https://huggingface.co/microsoft/deberta-v3-large (each `/raw/main/config.json`)
 
 Decision Index (third-party benchmark of Jev and its open reproductions):
 

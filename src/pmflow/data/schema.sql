@@ -84,10 +84,11 @@ CREATE INDEX IF NOT EXISTS pm_markets_event_idx ON pm_markets (event_id);
 -- Stored compactly (disk is the binding constraint: ~250 B/row instead of ~1 KB): hashes/addresses as
 -- bytea, market as Gamma market_id, outcome as index into pm_markets.outcomes / clob_token_ids.
 -- Use the view pm_trades_v for readable text columns.
--- role 0 = 'taker': default call (takerOnly=true); the aggressor side of each match. One row per
---                   (tx, taker wallet, token), sizes aggregated over the maker orders it hit.
--- role 1 = 'fill' : call with takerOnly=false; returns taker AND maker rows. Maker rows are the 'fill'
---                   rows with no identical 'taker' row (view pm_trades_maker).
+-- role 0 = taker: default call (takerOnly=true); the aggressor side of each match. One row per
+--                (tx, taker wallet, token), sizes aggregated over the maker orders it hit.
+-- role 1 = maker: from the takerOnly=false call (taker AND maker rows), minus rows identical to a stored
+--                taker row -> the passive counterparties. Only present for markets whose fills pass ran
+--                (ingest_state source='pm_trades_fill', status='done').
 CREATE TABLE IF NOT EXISTS pm_trades (
     key_hash       uuid        NOT NULL,   -- md5(tx|token|wallet|side|price|size|role): natural unique key
     market_id      bigint      NOT NULL,   -- -> pm_markets.market_id
@@ -98,7 +99,7 @@ CREATE TABLE IF NOT EXISTS pm_trades (
     wallet         bytea       NOT NULL,   -- 20-byte proxy wallet (opaque id)
     tx_hash        bytea       NOT NULL,
     ts             timestamptz NOT NULL,
-    role           smallint    NOT NULL    -- 0 taker, 1 fill (taker+maker)
+    role           smallint    NOT NULL    -- 0 taker, 1 maker
 );
 CREATE UNIQUE INDEX IF NOT EXISTS pm_trades_key_uq ON pm_trades (key_hash);
 CREATE INDEX IF NOT EXISTS pm_trades_market_ts_idx ON pm_trades (market_id, ts);
@@ -111,16 +112,10 @@ SELECT t.key_hash, t.market_id, m.condition_id, t.outcome_index,
        CASE WHEN t.is_buy THEN 'BUY' ELSE 'SELL' END AS side,
        t.price, t.size, t.price * t.size AS usd_notional,
        '0x' || encode(t.wallet, 'hex') AS wallet, '0x' || encode(t.tx_hash, 'hex') AS tx_hash, t.ts,
-       CASE t.role WHEN 0 THEN 'taker' ELSE 'fill' END AS role
+       CASE t.role WHEN 0 THEN 'taker' ELSE 'maker' END AS role
 FROM pm_trades t JOIN pm_markets m USING (market_id);
 
-CREATE OR REPLACE VIEW pm_trades_maker AS
-SELECT f.* FROM pm_trades f
-WHERE f.role = 1
-  AND NOT EXISTS (
-      SELECT 1 FROM pm_trades t
-      WHERE t.role = 0 AND t.market_id = f.market_id AND t.tx_hash = f.tx_hash AND t.wallet = f.wallet
-        AND t.outcome_index = f.outcome_index AND t.is_buy = f.is_buy AND t.price = f.price AND t.size = f.size);
+DROP VIEW IF EXISTS pm_trades_maker;
 
 -- ---------------------------------------------------------------- Polymarket price history
 CREATE TABLE IF NOT EXISTS pm_price_history (
@@ -132,42 +127,28 @@ CREATE TABLE IF NOT EXISTS pm_price_history (
     PRIMARY KEY (market_id, outcome_index, fidelity_min, ts)
 );
 
--- ---------------------------------------------------------------- Polymarket wallet activity
--- Source: data-api.polymarket.com/v2/activity?user=<wallet> (TRADE, REDEEM, SPLIT, MERGE, REWARD, CONVERSION ...)
--- Full per-wallet history across ALL markets (not only in-scope ones) -> first-seen, prior markets, PnL.
--- Fetched newest-first, capped per wallet (pm_wallets.activity_complete=false when the cap was hit).
-CREATE TABLE IF NOT EXISTS pm_wallet_activity (
-    key_hash      uuid NOT NULL,
-    wallet        bytea NOT NULL,
-    ts            timestamptz NOT NULL,
-    type          text NOT NULL,
-    condition_id  bytea,          -- 32 bytes; join: '0x'||encode(condition_id,'hex') = pm_markets.condition_id
-    outcome_index smallint,
-    is_buy        boolean,        -- NULL for non-trade rows
-    price         double precision,
-    size          double precision,
-    usdc_size     double precision,
-    tx_hash       bytea
-);
-CREATE UNIQUE INDEX IF NOT EXISTS pm_wallet_activity_uq ON pm_wallet_activity (key_hash);
-CREATE INDEX IF NOT EXISTS pm_wallet_activity_wallet_ts_idx ON pm_wallet_activity (wallet, ts);
-
+-- ---------------------------------------------------------------- Polymarket wallet histories
+-- Source: data-api.polymarket.com/v2/activity?user=<wallet>&sortDirection=ASC (TRADE, REDEEM, SPLIT, MERGE,
+-- REWARD, CONVERSION ...) across ALL Polymarket markets, not only in-scope ones. Fetched oldest-first with a
+-- page cap (default 10 x 1000 rows): first-seen is exact; for capped wallets (activity_complete=false) the
+-- per-market summary covers only their earliest activity. Raw activity rows are aggregated, not stored.
 -- one row per wallet whose activity we fetched (coverage bookkeeping)
 CREATE TABLE IF NOT EXISTS pm_wallets (
     wallet              bytea PRIMARY KEY,
     activity_fetched_at timestamptz,
     activity_complete   boolean,     -- FALSE if we hit the per-wallet page cap (first-seen then unknown)
     n_activity_rows     integer,
+    n_markets           integer,     -- distinct markets touched (within fetched activity)
     first_activity_ts   timestamptz, -- earliest activity of any type returned by /v2/activity
     first_trade_ts      timestamptz
 );
 
--- Derived per (wallet, market) summary from pm_wallet_activity (rebuilt by pmflow.data.derive).
+-- Per (wallet, market) aggregate of the wallet's activity; market_* columns filled by pmflow.data.derive.
 -- Point-in-time use: a feature at time t may only use rows with first_ts < t and, for PnL / win
 -- flags, only markets whose market_closed_time < t.
 CREATE TABLE IF NOT EXISTS pm_wallet_market_summary (
     wallet          bytea NOT NULL,
-    condition_id    text NOT NULL,
+    condition_id    text NOT NULL,   -- lower-case 0x hex, joins pm_markets.condition_id
     market_id       bigint,
     category        text,
     first_ts        timestamptz,

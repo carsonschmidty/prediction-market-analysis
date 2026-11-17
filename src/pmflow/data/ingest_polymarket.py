@@ -3,8 +3,10 @@
 Stages (run in this priority order; each is checkpointed in ingest_state):
   metadata  -> pmflow.data.ingest_gamma (all closed markets) + taxonomy apply
   trades    -> data-api /v2/trades?condition=<cid> (taker-only, the default)      source=pm_trades_taker
-  wallets   -> data-api /v2/activity?user=<wallet> for wallets in in-scope trades   source=pm_wallet_activity
-  fills     -> data-api /v2/trades?condition=<cid>&takerOnly=false (maker+taker)   source=pm_trades_fill
+  wallets   -> data-api /v2/activity?user=<wallet>&sortDirection=ASC, aggregated into
+               pm_wallets + pm_wallet_market_summary (wallets with a large in-scope taker trade)
+  fills     -> data-api /v2/trades?condition=<cid>&takerOnly=false (maker+taker); rows identical to a
+               stored taker row are dropped, so role=1 rows are maker fills       source=pm_trades_fill
   prices    -> clob /prices-history?market=<token>&interval=all&fidelity=1440 and
                hourly bars in 14-day windows (fidelity=60)                         source=pm_prices
 
@@ -78,7 +80,7 @@ def claim(conn, source: str) -> tuple[str, str | None, int] | None:
 
 TRADE_COPY_COLS = ("key_hash", "market_id", "outcome_index", "is_buy", "price", "size", "wallet", "tx_hash",
                    "ts", "role")
-ROLE_CODE = {"taker": 0, "fill": 1}
+ROLE_CODE = {"taker": 0, "fill": 1}  # fill pass stores maker rows only (role 1)
 
 
 def _hex(v: str | None) -> bytes:
@@ -121,17 +123,22 @@ def insert_trades(conn, rows: list[dict], role: str, mi: MarketInfo) -> int:
         size = float(x.get("size") or 0)
         tx = x.get("transaction_hash") or ""
         w = x.get("proxy_wallet") or ""
-        recs.append((key_uuid(tx.lower(), x.get("token_id"), w.lower(), x.get("side"), price, size, rc),
-                     mi.market_id, mi.outcome_index(x), x.get("side") == "BUY", price, size, _hex(w), _hex(tx),
-                     datetime.fromtimestamp(int(x["timestamp"]), tz=timezone.utc), rc))
+        kparts = (tx.lower(), x.get("token_id"), w.lower(), x.get("side"), price, size)
+        recs.append((key_uuid(*kparts, rc), mi.market_id, mi.outcome_index(x), x.get("side") == "BUY", price, size,
+                     _hex(w), _hex(tx), datetime.fromtimestamp(int(x["timestamp"]), tz=timezone.utc), rc,
+                     key_uuid(*kparts, 0) if rc else None))
     with conn.transaction():
         with conn.cursor() as cur:
-            cur.execute("CREATE TEMP TABLE IF NOT EXISTS _tr (LIKE pm_trades) ON COMMIT DELETE ROWS")
-            with cur.copy(f"COPY _tr ({', '.join(TRADE_COPY_COLS)}) FROM STDIN") as cp:
+            cur.execute("CREATE TEMP TABLE IF NOT EXISTS _tr (LIKE pm_trades, taker_key uuid) ON COMMIT DELETE ROWS")
+            with cur.copy(f"COPY _tr ({', '.join(TRADE_COPY_COLS)}, taker_key) FROM STDIN") as cp:
                 for r in recs:
                     cp.write_row(r)
+            # maker pass: drop rows that are identical to an already-stored taker row (keeps only maker fills)
             cur.execute(f"""INSERT INTO pm_trades ({', '.join(TRADE_COPY_COLS)})
-                            SELECT {', '.join(TRADE_COPY_COLS)} FROM _tr ON CONFLICT (key_hash) DO NOTHING""")
+                            SELECT {', '.join(TRADE_COPY_COLS)} FROM _tr
+                            WHERE _tr.taker_key IS NULL
+                               OR NOT EXISTS (SELECT 1 FROM pm_trades t WHERE t.key_hash = _tr.taker_key)
+                            ON CONFLICT (key_hash) DO NOTHING""")
             return cur.rowcount
 
 
@@ -189,40 +196,49 @@ def enqueue_wallets(conn, min_usd: float) -> int:
     return n
 
 
-ACT_COLS = ("key_hash", "wallet", "ts", "type", "condition_id", "outcome_index", "is_buy", "price", "size",
-            "usdc_size", "tx_hash")
+def wallet_unit(conn, wallet: str, max_pages: int) -> None:
+    """Fetch a wallet's activity OLDEST-FIRST (sortDirection=ASC) and aggregate per market.
 
-
-def wallet_unit(conn, wallet: str, cursor: str | None, n: int, max_pages: int) -> None:
-    pages = 0
-    complete = False
+    Oldest-first means the first-seen timestamp is exact even when the page cap truncates a heavy
+    wallet; for truncated wallets the per-market summary covers only their earliest activity.
+    Raw activity rows are not stored (disk budget); the per-(wallet, market) aggregate is.
+    """
     wb = _hex(wallet)
+    agg: dict[str, dict] = {}
+    first_ts = first_trade = None
+    n = pages = 0
+    cursor = None
+    complete = False
     while not STOP.is_set():
-        p = {"user": wallet, "limit": 1000}
+        p = {"user": wallet, "limit": 1000, "sortDirection": "ASC"}
         if cursor:
             p["cursor"] = cursor
         d = http.get_json(f"{DATA_API}/activity", p)
         rows = d.get("data") or []
-        if rows:
-            with conn.transaction():
-                with conn.cursor() as cur:
-                    cur.execute("CREATE TEMP TABLE IF NOT EXISTS _wa (LIKE pm_wallet_activity) ON COMMIT DELETE ROWS")
-                    with cur.copy(f"COPY _wa ({', '.join(ACT_COLS)}) FROM STDIN") as cp:
-                        for x in rows:
-                            tx = (x.get("transaction_hash") or "").lower()
-                            side = x.get("side") or None
-                            oi = x.get("outcome_index")
-                            cp.write_row((
-                                key_uuid(wallet, tx, x.get("type"), x.get("token_id"), side, x.get("size"),
-                                         x.get("price"), x.get("timestamp")),
-                                wb, datetime.fromtimestamp(int(x["timestamp"]), tz=timezone.utc), x.get("type"),
-                                _hex(x.get("condition_id")) if x.get("condition_id") else None,
-                                int(oi) if oi is not None and int(oi) < 100 else None,
-                                (side == "BUY") if side else None, x.get("price"), x.get("size"),
-                                x.get("usdc_size"), _hex(tx) if tx else None))
-                    cur.execute(f"INSERT INTO pm_wallet_activity ({', '.join(ACT_COLS)}) SELECT {', '.join(ACT_COLS)} "
-                                "FROM _wa ON CONFLICT DO NOTHING")
-            n += len(rows)
+        for x in rows:
+            ts = int(x["timestamp"])
+            typ = x.get("type") or ""
+            first_ts = ts if first_ts is None else min(first_ts, ts)
+            if typ == "TRADE":
+                first_trade = ts if first_trade is None else min(first_trade, ts)
+            cid = (x.get("condition_id") or "").lower()
+            if not cid:
+                continue
+            a_ = agg.setdefault(cid, {"first": ts, "last": ts, "n": 0, "buy": 0.0, "sell": 0.0, "redeem": 0.0,
+                                      "merge": 0.0, "split": 0.0})
+            a_["first"] = min(a_["first"], ts)
+            a_["last"] = max(a_["last"], ts)
+            usd = float(x.get("usdc_size") or 0)
+            if typ == "TRADE":
+                a_["n"] += 1
+                a_["buy" if x.get("side") == "BUY" else "sell"] += usd
+            elif typ == "REDEEM":
+                a_["redeem"] += usd
+            elif typ == "MERGE":
+                a_["merge"] += usd
+            elif typ == "SPLIT":
+                a_["split"] += usd
+        n += len(rows)
         pages += 1
         pg = d.get("pagination") or {}
         cursor = pg.get("next_cursor")
@@ -231,21 +247,29 @@ def wallet_unit(conn, wallet: str, cursor: str | None, n: int, max_pages: int) -
             break
         if max_pages and pages >= max_pages:
             break
-        state_set(conn, "pm_wallet_activity", wallet, "running", cursor=cursor, n_rows=n)
     if STOP.is_set() and not complete:
-        state_set(conn, "pm_wallet_activity", wallet, "pending", cursor=cursor, n_rows=n)
+        state_set(conn, "pm_wallet_activity", wallet, "pending", n_rows=0)
         return
-    conn.execute(
-        """INSERT INTO pm_wallets (wallet, activity_fetched_at, activity_complete, n_activity_rows,
-                                   first_activity_ts, first_trade_ts)
-           SELECT %s, now(), %s, %s, min(ts), min(ts) FILTER (WHERE type='TRADE')
-           FROM pm_wallet_activity WHERE wallet=%s
-           ON CONFLICT (wallet) DO UPDATE SET activity_fetched_at=now(), activity_complete=EXCLUDED.activity_complete,
-             n_activity_rows=EXCLUDED.n_activity_rows, first_activity_ts=EXCLUDED.first_activity_ts,
-             first_trade_ts=EXCLUDED.first_trade_ts""",
-        (wb, complete, n, wb))
-    # newest-first paging: an incomplete wallet's true first-seen time is earlier than what we hold
-    state_set(conn, "pm_wallet_activity", wallet, "done" if complete else "partial", cursor=cursor, n_rows=n)
+    def dt(v):
+        return datetime.fromtimestamp(v, tz=timezone.utc) if v is not None else None
+    with conn.transaction():
+        conn.execute("DELETE FROM pm_wallet_market_summary WHERE wallet=%s", (wb,))
+        with conn.cursor() as cur:
+            with cur.copy("COPY pm_wallet_market_summary (wallet, condition_id, first_ts, last_ts, n_trades, buy_usd, "
+                          "sell_usd, redeem_usd, merge_usd, split_usd, net_cashflow_usd) FROM STDIN") as cp:
+                for cid, a_ in agg.items():
+                    cp.write_row((wb, cid, dt(a_["first"]), dt(a_["last"]), a_["n"], a_["buy"], a_["sell"],
+                                  a_["redeem"], a_["merge"], a_["split"],
+                                  a_["sell"] + a_["redeem"] + a_["merge"] - a_["buy"] - a_["split"]))
+        conn.execute(
+            """INSERT INTO pm_wallets (wallet, activity_fetched_at, activity_complete, n_activity_rows, n_markets,
+                                       first_activity_ts, first_trade_ts)
+               VALUES (%s, now(), %s, %s, %s, %s, %s)
+               ON CONFLICT (wallet) DO UPDATE SET activity_fetched_at=now(), activity_complete=EXCLUDED.activity_complete,
+                 n_activity_rows=EXCLUDED.n_activity_rows, n_markets=EXCLUDED.n_markets,
+                 first_activity_ts=EXCLUDED.first_activity_ts, first_trade_ts=EXCLUDED.first_trade_ts""",
+            (wb, complete, n, len(agg), dt(first_ts), dt(first_trade)))
+    state_set(conn, "pm_wallet_activity", wallet, "done" if complete else "partial", n_rows=n)
 
 
 # ---------------------------------------------------------------- prices
@@ -316,7 +340,7 @@ def worker(stage: str, source: str, args) -> None:
             elif stage == "fills":
                 trades_unit(conn, source, key, cursor, n, "fill", args.max_pages)
             elif stage == "wallets":
-                wallet_unit(conn, key, cursor, n, args.max_wallet_pages)
+                wallet_unit(conn, key, args.max_wallet_pages)
             elif stage == "prices":
                 prices_unit(conn, key)
         except Exception as e:
@@ -342,7 +366,8 @@ def status() -> None:
         for q in ["SELECT 'pm_markets', count(*) FROM pm_markets",
                   "SELECT 'pm_markets in_scope', count(*) FROM pm_markets WHERE in_scope",
                   "SELECT 'pm_trades', count(*) FROM pm_trades",
-                  "SELECT 'pm_wallet_activity', count(*) FROM pm_wallet_activity",
+                  "SELECT 'pm_wallets', count(*) FROM pm_wallets",
+                  "SELECT 'pm_wallet_market_summary', count(*) FROM pm_wallet_market_summary",
                   "SELECT 'pm_price_history', count(*) FROM pm_price_history",
                   "SELECT 'kalshi_markets', count(*) FROM kalshi_markets",
                   "SELECT 'kalshi_trades', count(*) FROM kalshi_trades"]:
@@ -357,7 +382,7 @@ def main() -> None:
     ap.add_argument("--min-volume", type=float, default=0.0, help="skip markets below this Gamma volume")
     ap.add_argument("--max-pages", type=int, default=0, help="per-market page cap (0 = unlimited)")
     ap.add_argument("--min-wallet-usd", type=float, default=1000.0)
-    ap.add_argument("--max-wallet-pages", type=int, default=50)
+    ap.add_argument("--max-wallet-pages", type=int, default=10)
     ap.add_argument("--no-enqueue", action="store_true")
     ap.add_argument("--status", action="store_true")
     args = ap.parse_args()
@@ -365,6 +390,10 @@ def main() -> None:
         status()
         return
     setup_logging(f"ingest_polymarket_{args.stage}")
+    global MIN_FREE_GB
+    if "PMFLOW_MIN_FREE_GB" not in os.environ:
+        # maker fills are the least essential and most voluminous: leave room for other roles' tables
+        MIN_FREE_GB = {"fills": 8.0, "prices": 5.0}.get(args.stage, 4.0)
     apply_schema()
     source = SOURCES[args.stage]
     with connect() as c:

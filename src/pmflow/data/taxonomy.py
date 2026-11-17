@@ -129,19 +129,24 @@ GEO_MILITARY = _rx([
     r"nuke", r"deploy\w*", r"blockade", r"occupy", r"occupation", r"capture[sd]?", r"offensive", r"ground operation",
     r"military operation", r"special operation", r"shoot down", r"shot down", r"naval", r"navy", r"warship",
     r"hostilities", r"incursion", r"martial", r"annex\w*", r"seize[sd]?", r"enter (?:\w+ ){0,2}(?:city|territory)",
-    r"clash\w*", r"conflict", r"assassinat\w*", r"killed", r"kill"])
+    r"clash\w*", r"conflict", r"assassinat\w*", r"killed", r"kill", r"target\w*", r"military action",
+    r"war powers", r"(?:missile|nuclear|weapons?|icbm) tests?", r"tests? (?:a |an )?(?:missile|icbm|nuke|nuclear)",
+    r"launch\w* (?:\w+ ){0,3}(?:strikes?|attacks?|missiles?|offensive|invasion|operation)", r"shelling", r"casualt\w*", r"retake[sn]?", r"liberat\w*"])
 GEO_LEADER = _rx([
     r"resign\w*", r"out as", r"ousted", r"oust", r"removed", r"step(?:s)? down", r"coup", r"regime (?:change|fall\w*|collapse)",
     r"leave office", r"left office", r"no longer", r"successor", r"replaced", r"next (?:prime minister|pm|leader|supreme leader|president of)",
     r"supreme leader", r"fired", r"exile", r"flee\w*", r"detained", r"arrested", r"overthrow\w*", r"toppled",
-    r"dies?", r"death", r"vote of no confidence", r"no-confidence", r"leadership"])
+    r"dies?", r"death", r"vote of no confidence", r"no-confidence", r"leadership", r"out by", r"out before",
+    r"out in \d{4}", r"leader out", r"next (?:united states |us |u\.s\. )?(?:attorney general|secretary|ambassador|chair\w*|director|head|chancellor|premier)",
+    r"(?:no longer|remain\w*) (?:in|under) (?:\w+ ){0,2}control", r"in power"])
 GEO_SANCTIONS = _rx([r"sanction\w*", r"tariffs?", r"embargo\w*", r"export (?:control|ban)s?", r"trade war",
                      r"trade deal", r"ban(?:s|ned)? (?:\w+ ){0,3}(?:imports?|exports?)", r"price cap", r"swift",
                      r"freeze (?:\w+ )?assets", r"blacklist\w*", r"entity list"])
 GEO_TREATY = _rx([r"cease-?fire", r"truce", r"peace (?:deal|talks|agreement|treaty|plan|summit)", r"treaty", r"accords?",
                   r"armistice", r"hostages?", r"prisoner (?:swap|exchange)", r"normali[sz]\w*", r"recogni[sz]e\w*",
                   r"diplomatic relations", r"agreement", r"deal with", r"negotiat\w*", r"summit", r"meet(?:s|ing)? with",
-                  r"join nato", r"nato", r"un resolution", r"security council"])
+                  r"join nato", r"nato", r"un resolution", r"security council", r"visit\w*", r"call with",
+                  r"talks", r"diplomatic", r"article 4", r"article 5"])
 GEO_EMERGENCY = _rx([r"martial law", r"state of emergency", r"national emergency", r"emergency (?:powers|declaration|order)",
                      r"executive order", r"insurrection act", r"lockdown", r"curfew", r"pardon\w*", r"invoke\w*",
                      r"declare\w*", r"nationali[sz]\w*", r"default on", r"capital controls", r"travel ban",
@@ -166,6 +171,21 @@ GEO_ACTORS = _rx([
     r"australia\w*", r"portug\w*", r"austria\w*", r"czech", r"greece", r"greek", r"irish", r"ireland",
     r"scotland", r"scottish", r"sweden", r"swedish", r"norway", r"denmark", r"finland", r"foreign", r"embassy", r"ambassador", r"prime minister", r"pm",
     r"head of state", r"regime", r"supreme leader", r"king", r"pope", r"vatican"])
+# markets that carry geo tags but resolve on prices, rankings or prizes -> not geopolitical events
+PRICE_TAGS = _tags(["Hit Price", "Finance Updown", "Pyth Finance", "Stock Prices", "Equities", "Daily-Close",
+                    "Equity Daily Pyth", "AI Rankings", "Commodities"])
+RX_NON_EVENT = _rx([r"nobel", r"(?:best|top|third-best|second-best) (?:\w+ ){0,3}(?:ai|model|company)",
+                    r"(?:wti|brent|crude oil|gold|silver) (?:\(\w+\) )?(?:hit|above|below|close)",
+                    r"hit \((?:high|low)\)", r"time person of the year", r"word of the year"])
+RX_US_LEADER = _rx([r"resign\w*", r"out as", r"step(?:s)? down", r"fired", r"fires", r"leave\w*", r"next to leave",
+                    r"removed", r"ousted", r"replaced", r"departs?", r"exit\w*",
+                    r"next (?:united states |us |u\.s\. )?(?:attorney general|secretary|ambassador|chair\w*|director|head)",
+                    r"(?:announce|nominate)\w* (?:\w+ ){1,4}as (?:the )?next"])
+RX_ELECTION_STRICT = _rx([r"elections?", r"elected", r"primary", r"primaries", r"caucus\w*", r"referendum", r"ballot",
+                          r"runoff", r"vote share", r"seats?", r"nominee", r"nomination", r"polls?", r"popular vote",
+                          r"electoral", r"most votes", r"win (?:the )?(?:\w+ ){0,4}(?:seat|district|race|state)"])
+RX_NOVELTY = _rx([r"miss universe", r"miss world", r"eurovision", r"shake hands", r"handshake", r"state dinner",
+                  r"wear\w*", r"outfit", r"hold hands"])
 RX_US_EXEC = _rx([r"trump", r"white house", r"president", r"administration", r"secretary of state", r"rubio",
                   r"hegseth", r"vance", r"biden"])
 
@@ -198,6 +218,9 @@ def classify(question: str | None, event_title: str | None = None, tags: list[st
     if legacy not in ("unknown", None) and not tl:
         return done(legacy, f"legacy_category:{gamma_category}")
 
+    if tl & PRICE_TAGS or RX_NON_EVENT.search(q):
+        return done("other", "tag_or_kw:price_ranking_prize")
+
     # 2. central bank / macro
     if RX_MACRO_DECISION.search(q) and not GEO_MILITARY.search(q):
         return done("macro_central_bank", "kw:central_bank_decision", macro_comparison=True)
@@ -218,6 +241,11 @@ def classify(question: str | None, event_title: str | None = None, tags: list[st
         if rx.search(q):
             sub = name
             break
+    if RX_NOVELTY.search(q):
+        return done("entertainment", "kw:novelty")
+    if election and sub == "leadership_change" and not RX_ELECTION_STRICT.search(q):
+        # "next PM / next leader out / successor" markets resolve on unscheduled leadership change
+        election = False
     if election:
         res["is_scheduled_election"] = True
         if geo_tagged or geo_actor:
@@ -226,6 +254,10 @@ def classify(question: str | None, event_title: str | None = None, tags: list[st
         return done("elections_domestic_politics", "election:domestic")
     if sub and (geo_tagged or geo_actor):
         return done("geopolitical", f"kw:{sub}+{'tag' if geo_tagged else 'actor'}", geo_subtype=sub)
+    if sub == "leadership_change" and RX_US_EXEC.search(q) and not RX_US_LEADER.search(q):
+        sub = None   # e.g. arrests/indictments of US politicians are domestic legal events, not gov decisions
+    if not sub and RX_US_EXEC.search(q) and RX_US_LEADER.search(q):
+        sub = "leadership_change"
     if sub in ("sanctions", "emergency_policy", "military", "leadership_change") and RX_US_EXEC.search(q):
         # US executive actions (tariffs, executive orders, pardons, strikes ordered by the President)
         return done("geopolitical", f"kw:{sub}+us_exec", geo_subtype=sub)

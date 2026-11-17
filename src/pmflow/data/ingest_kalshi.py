@@ -65,14 +65,23 @@ def market_row(m: dict, series: tuple) -> tuple:
 
 
 def markets_stage(conn) -> None:
-    series = conn.execute("SELECT series_ticker, title, category, tags FROM kalshi_series WHERE category = ANY(%s) "
+    allser = conn.execute("SELECT series_ticker, title, category, tags FROM kalshi_series WHERE category = ANY(%s) "
                           "ORDER BY series_ticker", (list(CATEGORIES),)).fetchall()
+    # The public API is heavily rate-limited from our egress, so only series whose own title/tags classify
+    # as geopolitical or central-bank (or that sit in Kalshi's 'World' category) are expanded.
+    series = []
+    for s in allser:
+        r = classify(s[1], None, list(s[3] or []) + ([CAT_TAG[s[2]]] if s[2] in CAT_TAG else []), None)
+        if s[2] == "World" or r["category"] == "geopolitical" or r["macro_comparison"]:
+            series.append(s)
+    log.info("kalshi: expanding %d of %d World/Politics/Economics series", len(series), len(allser))
     for i, s in enumerate(series):
         key = s[0]
         st = state_get(conn, "kalshi_markets", key)
         if st and st["status"] == "done":
             continue
         n = 0
+        failed = False
         for path, extra in (("/markets", {"status": "settled"}), ("/historical/markets", {})):
             cursor = None
             while True:
@@ -83,6 +92,7 @@ def markets_stage(conn) -> None:
                     d = http.get_json(K + path, p)
                 except HttpError as e:
                     log.warning("series %s %s: %s", key, path, e)
+                    failed = True
                     break
                 ms = d.get("markets") or []
                 if ms:
@@ -92,7 +102,7 @@ def markets_stage(conn) -> None:
                 cursor = d.get("cursor")
                 if not cursor or not ms:
                     break
-        state_set(conn, "kalshi_markets", key, "done", n_rows=n)
+        state_set(conn, "kalshi_markets", key, "error" if failed else "done", n_rows=n)
         if i % 100 == 0:
             log.info("series %d/%d (%s): %d markets", i + 1, len(series), key, n)
 
@@ -106,6 +116,7 @@ def trades_stage(conn, max_markets: int) -> None:
                            ORDER BY priority DESC LIMIT %s""", (max_markets,)).fetchall()
     for i, (ticker,) in enumerate(todo):
         n = 0
+        failed = False
         for path in ("/markets/trades", "/historical/trades"):
             cursor = None
             while True:
@@ -116,6 +127,7 @@ def trades_stage(conn, max_markets: int) -> None:
                     d = http.get_json(K + path, p)
                 except HttpError as e:
                     log.warning("trades %s %s: %s", ticker, path, e)
+                    failed = True
                     break
                 ts = d.get("trades") or []
                 if ts:
@@ -132,7 +144,7 @@ def trades_stage(conn, max_markets: int) -> None:
                 cursor = d.get("cursor")
                 if not cursor or not ts:
                     break
-        state_set(conn, "kalshi_trades", ticker, "done", n_rows=n)
+        state_set(conn, "kalshi_trades", ticker, "error" if failed else "done", n_rows=n)
         if i % 50 == 0:
             log.info("kalshi trades %d/%d %s: %d", i + 1, len(todo), ticker, n)
 
