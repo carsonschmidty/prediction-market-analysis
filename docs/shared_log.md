@@ -176,9 +176,11 @@ Build: `.venv/bin/python -m pmflow.evaluation.snapshots` (idempotent, ~1 min). T
   before event_close +0.098 vs >180d -0.080, diagnostic only). Any intercept / YES-shift fitted on such rows "wins"
   val (stack with free intercept: +0.0097) without flow information. Test (resolved by 2026-11-17) is built the same
   way. Candidates were therefore restricted to no-free-intercept models, and a price-only control is shipped.
-- Exploratory system one (gate NOT passed; ~75 CPU-min): ModernBERT encoder of gliclass-instruct-edge-v1.0 with a
+- Exploratory system one (gate NOT passed; ~65 CPU-min): ModernBERT encoder of gliclass-instruct-edge-v1.0 with a
   fresh residual head, run in JAX (validated vs onnxruntime, max |logit diff| 2e-4). Question-only text does as well
-  as text+flow descriptors on val (topic/regime tilt, no train-OOF gain); descriptors add nothing.
+  as text+flow descriptors on val (topic/regime tilt, no train-OOF gain); descriptors add nothing; a 1-epoch
+  full fine-tune (24k train snapshots) overfits market identity and is WORSE than price on in-scope val
+  (-0.0170 [-0.0342,-0.0015] Brier).
 - BLOCKER (worked around, logged): PyTorch not installable — PyPI wheel is CUDA-13 only and needs ~4 GB nvidia libs
   (disk), download.pytorch.org is proxy-blocked (403). GLiClass library and tasksource-decider-nano zero-shot not run.
 - Pre-registered (3): PRIMARY preds_lgbm_anchored, preds_stack_s1 (no intercept), preds_ridge_flow; control

@@ -196,8 +196,8 @@ price-only control in either universe. Several are significantly worse. Nothing 
 ## 4. Stage 3: exploratory "system one" (gate not passed; one small, time-boxed run)
 
 This section is clearly labelled **exploratory**. The full version (multi-seed, walk-forward fine-tunes) was
-not built because the gate failed. Compute used: 31 min embedding + about 1 min heads + about 40 min
-fine-tune, roughly 75 CPU-min in total.
+not built because the gate failed. Compute used: 31 min embedding + about 1 min heads + 31 min
+fine-tune, roughly 65 CPU-min in total.
 
 **What was run.**
 - **Backbone.** The ModernBERT (Ettin-32m) encoder inside `knowledgator/gliclass-instruct-edge-v1.0`
@@ -234,7 +234,7 @@ fine-tune, roughly 75 CPU-min in total.
 | s1_text_desc (frozen) | +0.0022 [+0.0006, +0.0038] | +0.0057 [+0.0008, +0.0101] | +0.0001 [−0.0012, +0.0012] | +0.0021 [−0.0011, +0.0054] | +0.0004 [−0.0010, +0.0018] |
 | s1_text_only (question only) | +0.0028 [+0.0007, +0.0048] | +0.0079 [+0.0016, +0.0137] | −0.0002 [−0.0026, +0.0020] | −0.0003 [−0.0059, +0.0052] | −0.0001 [−0.0015, +0.0011] |
 | s1_text_desc_noint | +0.0017 [+0.0003, +0.0031] | +0.0042 [−0.0002, +0.0081] | −0.0002 [−0.0015, +0.0009] | +0.0016 [−0.0019, +0.0046] | +0.0008 [−0.0004, +0.0021] |
-| s1_finetune (24k, 1 epoch) | FT_INS_B | FT_INS_L | FT_MAC_B | FT_MAC_L | not run (no walk-forward) |
+| s1_finetune (24k, 1 epoch, 750 steps) | **−0.0170 [−0.0342, −0.0015]** | −0.0603 [−0.1112, −0.0164] | −0.0122 [−0.0304, +0.0034] | −0.0183 [−0.0620, +0.0223] | not run (no walk-forward) |
 
 **Reading.**
 - **The question text alone does at least as well as question plus flow descriptors.** Its val gain is
@@ -242,6 +242,12 @@ fine-tune, roughly 75 CPU-min in total.
   It is therefore a topic/regime effect: which kinds of question resolved YES in Apr–Jun 2026, possibly
   helped by encoder pre-training contamination. It is not flow.
 - The verbalised flow descriptors add nothing on top of the text.
+- **The fine-tune overfits and is significantly worse than price on in-scope val.** Its train loss fell from
+  0.370 (price only) to 0.284 within one epoch. Each training market contributes many near-identical
+  snapshots, so the encoder learns "this question resolves YES/NO" (market identity), which does not transfer
+  to new events. It moves val prices by 11pp on average (`stage3_finetune_val.csv`, `stage3_finetune_loss.csv`).
+  A credible fine-tune would need market-level deduplication, walk-forward early stopping and several seeds,
+  which is the full programme that the gate did not justify.
 - The auxiliary informed-flow head has val AUC 0.997, but this is trivial. The text contains the
   loose-pattern descriptor, and L2 requires the pattern, so the head detects "pattern present". It says
   nothing about whether the flow was informed. Among pattern firings, vindication tracks the entry price
@@ -288,10 +294,11 @@ fine-tune, roughly 75 CPU-min in total.
   - **Rule (fixed before looking):** choose the threshold with the highest pooled val excess precision,
     with at least 10 flagged events and a clustered 95% CI lower bound > 0; otherwise freeze 0.05.
   - **Frozen thresholds:** lgbm_anchored **0.03**, stack_s1 **0.05**, ridge_flow **0.05** (the rule was not
-    met; at ≥ 0.03 it never flags on val).
+    met; at ≥ 0.03 it never flags on val), control ctrl_lgbm_price_only **0.05**.
   - **Caveat.** On val, 99–100% of flags are YES flags. Their excess precision (+0.25 for lgbm at 0.03) is
-    the YES-heavy val regime and window selection. The price-only control's flags behave the same way
-    (same table, `ctrl_lgbm_price_only`). Do not read flag precision without that control.
+    the YES-heavy val regime and window selection. The price-only control, which has no flow features,
+    behaves the same way (same table): 100% YES flags, val excess +0.17 at 0.03 and +0.21 at 0.05. Do not read
+    flag precision without that control.
   - lgbm_anchored never moves price by ≥ 0.05, so harness edges ≥ 0.05 will be empty for it.
 
 ## 7. Window-selection bias (important for the evaluator)

@@ -152,6 +152,10 @@
   "ridge_flow": {
    "threshold": 0.05,
    "rule_met": false
+  },
+  "ctrl_lgbm_price_only": {
+   "threshold": 0.05,
+   "rule_met": true
   }
  }
 }
