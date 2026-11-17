@@ -35,14 +35,14 @@
     "max_ts": "2026-02-03 07:00:28+00"
   },
   "pm_wallets": {
-    "rows": 177,
+    "rows": 2068,
     "min_ts": "2023-11-18 21:23:03+00",
-    "max_ts": "2026-06-11 23:56:27+00"
+    "max_ts": "2026-10-21 20:07:57+00"
   },
   "pm_wallet_market_summary": {
-    "rows": 44047,
+    "rows": 529181,
     "min_ts": "2023-11-18 21:23:03+00",
-    "max_ts": "2026-11-17 21:10:01+00"
+    "max_ts": "2026-11-17 21:27:08+00"
   },
   "kalshi_markets": {
     "rows": 4404,
@@ -50,9 +50,9 @@
     "max_ts": "2026-11-17 14:00:00+00"
   },
   "kalshi_trades": {
-    "rows": 0,
-    "min_ts": null,
-    "max_ts": null
+    "rows": 418108,
+    "min_ts": "2024-10-25 14:45:19.604213+00",
+    "max_ts": "2026-10-31 23:12:01.719139+00"
   },
   "ingest_state": {
     "gamma_markets": {
@@ -63,14 +63,34 @@
     },
     "kalshi_markets": {
       "done": {
-        "units": 503,
+        "units": 518,
         "rows": 4559
+      }
+    },
+    "kalshi_trades": {
+      "done": {
+        "units": 79,
+        "rows": 418274
+      },
+      "pending": {
+        "units": 3711,
+        "rows": 0
       }
     },
     "pm_prices": {
       "done": {
         "units": 1,
         "rows": 731
+      },
+      "pending": {
+        "units": 22051,
+        "rows": 0
+      }
+    },
+    "pm_trades_fill": {
+      "pending": {
+        "units": 11027,
+        "rows": 0
       }
     },
     "pm_trades_taker": {
@@ -81,19 +101,15 @@
     },
     "pm_wallet_activity": {
       "done": {
-        "units": 116,
-        "rows": 291656
+        "units": 1630,
+        "rows": 2947298
       },
       "partial": {
-        "units": 61,
-        "rows": 610000
+        "units": 438,
+        "rows": 4380000
       },
       "pending": {
-        "units": 50834,
-        "rows": 0
-      },
-      "running": {
-        "units": 6,
+        "units": 48949,
         "rows": 0
       }
     }

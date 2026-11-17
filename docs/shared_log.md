@@ -90,3 +90,41 @@ Writing `docs/reported_cases.md` and `docs/labeling_plan.md` was rejected by the
 - Still running in background (resumable): wallet histories (50.9k wallets) → maker fills → price history;
   Kalshi markets → trades. Progress: `.venv/bin/python -m pmflow.data.ingest_polymarket --status`.
 - Gamma `volume_usd` ≠ taker notional (2–8× larger); use trade-level notional.
+
+## [2026-11-17 21:35 UTC] evaluation — eval_snapshots grid + FIXED splits are ready (use these, do not redefine)
+Build: `.venv/bin/python -m pmflow.evaluation.snapshots` (idempotent, ~1 min). Tables:
+- **`eval_snapshots`** (1.51M rows, PK `snapshot_id`): `snapshot_id, market_id, event_id, universe` ('in_scope'|'macro'),
+  `geo_subtype, neg_risk, y` (1 = YES/outcome-0 won), `cutoff_ts, grid_24h, price_yes` (last TAKER trade before cutoff,
+  YES-equivalent: outcome-1 trades mapped to 1-p), `vwap_6h, vwap_24h, last_trade_age_h, n_trades_24h, usd_24h,
+  n_trades_7d, usd_7d, n_trades_cum, usd_cum, hours_since_open, pre_trade_window_market, split, is_live`, and two
+  LEAKY diagnostic columns `hours_to_close_diag, hours_to_end_date_diag` (never use as features/filters).
+- Grid: fixed UTC calendar grid every 6h (00/06/12/18), from first taker trade until the market's `closed_time`
+  (open-ness is knowable live). **Rule: a predictor for a snapshot may only use data with ts < cutoff_ts.**
+- **Primary evaluation set = `is_live AND split IN ('train','val','test')`**. is_live (all computable at cutoff):
+  price_yes in [0.03,0.97], last trade <= 72h ago, >= 3 taker trades and >= $200 taker notional in last 7 days.
+- **Splits (by event_id; event_close = max closed_time of its resolved in-scope/macro markets):**
+  train = events closing < 2026-04-01; val = events closing in [2026-04-01, 2026-07-01) AND cutoff >= 2026-04-01;
+  test = events closing >= 2026-07-01 AND cutoff >= 2026-07-01. Snapshots of val/test events before their period
+  start are `purged_val` (may be used only to refit a final model on train+val) / `purged_test` (never use).
+  Table `eval_event_splits(event_id, event_close, split, ...)`. No event straddles splits; no training label resolves
+  after any val/test cutoff.
+- Live counts (in-scope): train 378,644 snaps / 4,099 mkts / 2,081 events; val 43,713 / 1,019 / 281; test 105,302 /
+  2,003 / 541. Macro: train 81,948/475/179; val 9,750/128/48; test 31,389/363/95. Use `grid_24h` (00:00 UTC only)
+  for cheaper feature development (~1/4 of rows).
+- Predictions for the harness: a table/parquet `(snapshot_id, p_model)`; see `docs/evaluation_baseline.md`.
+- `eval_diag_snapshots`: DIAGNOSTIC 1/6/24/72h-before-closed_time / last-trade anchors. Leaky anchors, never for model selection.
+
+## [2026-11-17 21:50 UTC] evaluation — Baseline A done; harness + leakage audit ready (docs/evaluation_baseline.md)
+- Baseline A = raw last-trade price, primary live snapshots, event-clustered 95% CIs. In-scope test: Brier 0.1249
+  [0.1121, 0.1394], log loss 0.398 [0.365, 0.436]. Macro test: Brier 0.2193 [0.1806, 0.2607]. Climatology test: 0.229 / 0.286.
+- **Recalibrated price (Platt/isotonic fitted on train) does NOT beat raw price out of sample.** In-scope test ΔBrier
+  −0.0001 [−0.0013, +0.0010]; worse on val (−0.0050) and on macro test (−0.0146). Raw price is the bar. Also compare
+  models with `eval_baseline_preds.p_iso` so that "re-learned calibration" does not count as a flow signal.
+- MDE (α=.05, power .8): in-scope test ≈ 0.0012–0.0016 Brier (~1% relative) for models moving prices ~2pp; macro test ≈ 0.007–0.011.
+- Trading hurdle: reconstructed fills cost ≈ 1c spread + ≈1.6c impact at $100. The calibration-edge reference
+  strategy loses 9% per $ on in-scope test (−6.7% even without impact).
+- Harness: `python -m pmflow.evaluation.harness --pred <parquet|table:...> --name <run> [--trade]`. Leakage audit:
+  `pmflow.evaluation.leakage.audit_sql_feature / audit_python_feature / check_source_timestamps`. Features/modeling:
+  please run the audit on your features and log it.
+- Caveat: val/test are dominated by the 2026 Iran/Middle-East conflict cluster. Cross-event correlation means the CIs
+  are optimistic. Val (Apr–Jun 2026) is a YES-heavy regime (base rate 0.43 vs mean price 0.32).

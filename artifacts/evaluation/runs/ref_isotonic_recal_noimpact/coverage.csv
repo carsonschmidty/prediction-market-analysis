@@ -1,0 +1,7 @@
+universe,split,n_primary,n_pred,coverage,n_pred_outside_primary
+in_scope,test,105302,105302,1.0,0
+in_scope,train,378644,378644,1.0,0
+in_scope,val,43713,43713,1.0,0
+macro,test,31389,31389,1.0,0
+macro,train,81948,81948,1.0,0
+macro,val,9750,9750,1.0,0
