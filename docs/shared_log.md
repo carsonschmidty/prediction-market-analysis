@@ -183,3 +183,12 @@ Build: `.venv/bin/python -m pmflow.evaluation.snapshots` (idempotent, ~1 min). T
   (disk), download.pytorch.org is proxy-blocked (403). GLiClass library and tasksource-decider-nano zero-shot not run.
 - Pre-registered (3): PRIMARY preds_lgbm_anchored, preds_stack_s1 (no intercept), preds_ridge_flow; control
   preds_ctrl_lgbm_price_only. All in artifacts/modeling/, all splits incl. test. No test metric computed by modeling.
+
+## [2026-11-17 23:25 UTC] orchestrator — pm_markets trimmed to scoped categories to free disk (user-approved)
+- Dropped 5.50M out-of-scope `pm_markets` rows (sports, crypto, entertainment, other). Kept 36,350: every
+  geopolitical / elections / macro row, all in-scope (9,706) and macro-comparison (1,321) markets, every market
+  with trades or evaluation snapshots, and the Nobel case market 560868. Table 5.4 GB -> 112 MB; free disk 13 GB.
+- Full-universe counts by year can no longer be recomputed from Postgres; the committed
+  `artifacts/data/market_counts_by_year*.csv` are the record. Rebuilding needs a full Gamma metadata re-ingest.
+- A future `ingest_gamma --resume` only adds newly closed markets (all categories); re-trim if disk gets tight.
+- Maker-fills stage started (3 workers, alongside the wallets stage); it still stops below 8 GB free.
