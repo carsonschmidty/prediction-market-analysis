@@ -184,7 +184,7 @@ RX_US_LEADER = _rx([r"resign\w*", r"out as", r"step(?:s)? down", r"fired", r"fir
 RX_ELECTION_STRICT = _rx([r"elections?", r"elected", r"primary", r"primaries", r"caucus\w*", r"referendum", r"ballot",
                           r"runoff", r"vote share", r"seats?", r"nominee", r"nomination", r"polls?", r"popular vote",
                           r"electoral", r"most votes", r"win (?:the )?(?:\w+ ){0,4}(?:seat|district|race|state)"])
-RX_NOVELTY = _rx([r"miss universe", r"miss world", r"eurovision", r"shake hands", r"handshake", r"state dinner",
+RX_NOVELTY = _rx([r"miss (?:universe|world|france|america|usa|earth|international|grand)", r"eurovision", r"shake hands", r"handshake", r"state dinner",
                   r"wear\w*", r"outfit", r"hold hands"])
 RX_US_EXEC = _rx([r"trump", r"white house", r"president", r"administration", r"secretary of state", r"rubio",
                   r"hegseth", r"vance", r"biden"])
@@ -224,7 +224,7 @@ def classify(question: str | None, event_title: str | None = None, tags: list[st
     # 2. central bank / macro
     if RX_MACRO_DECISION.search(q) and not GEO_MILITARY.search(q):
         return done("macro_central_bank", "kw:central_bank_decision", macro_comparison=True)
-    if tl & MACRO_TAGS or RX_MACRO_DATA.search(q):
+    if (tl & MACRO_TAGS or RX_MACRO_DATA.search(q)) and not GEO_SANCTIONS.search(q):
         if RX_MACRO_DECISION.search(q) or tl & _tags(["Fed", "Fed Rates", "FOMC", "Jerome Powell", "Global Rates"]):
             return done("macro_central_bank", "tag:central_bank", macro_comparison=True)
         return done("macro_central_bank", "tag_or_kw:macro_data_release")
