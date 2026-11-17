@@ -128,3 +128,36 @@ Build: `.venv/bin/python -m pmflow.evaluation.snapshots` (idempotent, ~1 min). T
   please run the audit on your features and log it.
 - Caveat: val/test are dominated by the 2026 Iran/Middle-East conflict cluster. Cross-event correlation means the CIs
   are optimistic. Val (Apr–Jun 2026) is a YES-heavy regime (base rate 0.43 vs mean price 0.32).
+
+## [2026-11-17 21:50 UTC] features — base tables + feature library ready; snapshot build running
+- `feat_market_meta` (corpus = in_scope OR macro_comparison, 11,027 markets) and `feat_wallet_hist` (1.22M wallets,
+  438 MB: per-wallet sorted arrays for point-in-time first-seen / prior markets / realised PnL on markets closed before
+  the cutoff / cumulative notional by UTC day). Build: `python -m pmflow.features.base --rebuild` (~1 min).
+- Library: `pmflow.features.core.compute_window_features(market_id, cutoff_ts)` / `compute_features_batch(df)`.
+  Leakage test (`tests/features/test_leakage.py`) passes: features on full DB == features on a DB copy truncated at
+  the cutoff, 8 (market, cutoff) pairs, all 78 columns; negative control (truncate 1h earlier) changes 60/78 columns.
+- `feat_snapshot_features` (keyed by eval_snapshots.snapshot_id) building now for `grid_24h AND is_live AND
+  split <> 'purged_test'` (178k rows, ~170 MB). The 6-hourly live grid would be ~0.7 GB; not built (disk).
+- GAP (data agent): case markets with NO trades because out of corpus: PM-003 Nobel/Machado 560868 (taxonomy
+  `other`), PM-018/019/020/022 (out of scope, expected). PM-012 market (Gamma 1466015, "US x Iran ceasefire by
+  March 31?") and PM-021 (682705) are not in pm_markets at all. If trades for 560868 and 1466015 can be ingested,
+  the case study gains one seed positive and the key negative.
+- pm_wallets coverage at 21:45 UTC: 769 wallets (550 activity_complete) of ~51k queued. Full-history features
+  (`full_cov_share`, `fws72_full`, `dom_log_prior_mkts_full`) reflect coverage at build time only.
+
+## [2026-11-17 22:15 UTC] features — snapshot features, weak labels and case study done (docs/features.md)
+- `feat_snapshot_features` (150 MB, PK snapshot_id): 178,378 rows = eval_snapshots `grid_24h AND is_live AND
+  split <> 'purged_test'`; 15 cutoff-level + 56 window features x {1,6,24,72}h (`<name>_<L>h`). Built from
+  trades with ts < cutoff_ts only; leakage tests pass (incl. stored rows vs truncated-DB recompute). The 6-hourly live
+  grid is NOT materialised (~0.6 GB; disk). Rebuild/extend: `python -m pmflow.features.snapshots [--set live]`.
+  Sample parquet: artifacts/features/feat_snapshot_features_sample2pct.parquet.
+- `feat_weak_labels` (48 MB): labeling-plan conditions a-d + pattern flags (no outcome) and L1/N1/L2/N2 label
+  columns (outcome; label only). In-scope, summed over lookbacks: strong pattern L1/N1 = train 6/24, val 1/0,
+  test 2/0; it fires on <=0.024% of snapshots. Hit rates of possible/loose patterns ~ equal the dominant side's entry
+  price (excess -0.02..+0.06 train): no evidence the pattern beats the price.
+- Case study (taker data): the labeling-plan footprint fires in 0 of 64 pre-news case windows; pre-news windows
+  show elevated volume / new-wallet counts but NOT one-sided fresh flow; the dominant taker side was the eventual
+  winner in only 11/44 positive-case windows. PM-001's reported ~$33k fresh-account YES buying is visible (one new
+  wallet, $32.5k at 0.074); PM-007/PM-011 "fresh wallet" claims are not visible in taker trades.
+- Modeling: wallet features are corpus-relative (fresh = new to geopolitical/macro markets); full-history columns
+  (`full_*`) cover only ~2k wallets. Prefer `fresh_nsn_*`, `dom_*`, `whale_*` with care; all thresholds untuned.

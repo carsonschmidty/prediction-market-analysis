@@ -1,0 +1,12 @@
+case_id,case_type,reason
+PM-003,suspected_informed,no trades in corpus
+PM-010,suspected_informed,no news timestamp
+PM-012,negative_fresh_wallets_wrong,no news timestamp
+PM-014,negative_whale_wrong,no news timestamp
+PM-018,suspected_informed,no trades in corpus
+PM-019,suspected_informed,no trades in corpus
+PM-020,suspected_informed_weak,no trades in corpus
+KX-001,confirmed_platform_discipline,no news timestamp
+KX-002,confirmed_regulator_action,no news timestamp
+PM-021,suspected_informed_pending,market not in pm_markets
+PM-022,contrast_whale_research,no trades in corpus

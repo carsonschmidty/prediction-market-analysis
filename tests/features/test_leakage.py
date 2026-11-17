@@ -93,3 +93,31 @@ def test_future_trades_do_not_change_features(conn):
     b = compute_features_batch([(916440, "2026-01-01T00:00:00Z"), (916440, "2026-01-03T12:00:00Z")], conn=conn)
     b = b[b["cutoff_ts"] == pd.Timestamp("2026-01-01T00:00:00Z")].reset_index(drop=True)
     assert not _compare(a, b)
+
+
+def test_materialised_table_matches_truncated_recompute(conn):
+    """Stored feat_snapshot_features rows (float4) equal a recomputation on the truncated DB."""
+    from pmflow.features.core import to_wide
+    with conn.cursor() as cur:
+        cur.execute("select to_regclass('feat_snapshot_features') is not null")
+        if not cur.fetchone()[0]:
+            pytest.skip("feat_snapshot_features not built")
+    stored = pd.read_sql_query(
+        "select f.* from feat_snapshot_features f join pm_market_trade_stats s using (market_id)"
+        " where s.n_taker < 40000 order by md5(f.snapshot_id::text) limit 5", conn)
+    for _, row in stored.iterrows():
+        src = _cut_sources(conn, int(row.market_id), row.cutoff_ts)
+        w = to_wide(compute_window_features(int(row.market_id), row.cutoff_ts, conn=conn, src=src))
+        bad = []
+        for col in stored.columns:
+            if col in ("snapshot_id", "cutoff_ts") or col not in w and col.replace("burst_b", "burst_B") not in w:
+                continue
+            a = row[col]
+            b = w[col if col in w else col.replace("burst_b", "burst_B")].iloc[0]
+            if isinstance(a, (str, bool, np.bool_)) or a is None:
+                if str(a) != str(b) and not (pd.isna(a) and pd.isna(b)):
+                    bad.append(col)
+            elif not np.isclose(float(a), float(b), rtol=2e-6 * 10, atol=1e-5, equal_nan=True):
+                bad.append(col)
+        assert not bad, f"snapshot {row.snapshot_id}: {bad}"
+    conn.rollback()

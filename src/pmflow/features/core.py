@@ -141,24 +141,36 @@ class _Wallets:
         r = self.h.get(w)
         return r[0] if r is not None else np.nan
 
-    def asof(self, w: bytes, c: float, market_id: int) -> tuple:
-        """(prior_mkts, res_n, res_wins, res_pnl, cum_usd_prior_days, full_ok, full_first_t,
-        full_prior_mkts) for wallet w as of cutoff c, excluding market_id from prior markets."""
+    def asof_many(self, w: bytes, cs: np.ndarray, market_id: int) -> np.ndarray:
+        """Matrix (len(cs) x 8) of wallet w's attributes as of each cutoff in cs:
+        prior_mkts (excl. market_id), res_n, res_wins, res_pnl, cum_usd_prior_days, full_ok,
+        full_first_t, full_prior_mkts. Only history strictly before each cutoff is used."""
+        out = np.full((len(cs), 8), np.nan)
+        out[:, 5] = 0.0
         r = self.h.get(w)
         if r is None:
-            return (np.nan,) * 5 + (False, np.nan, np.nan)
+            return out
         ft, fb, mi, mf, rt, rpc, rwc, de, cu = r
-        k = int(np.searchsorted(mf, c, "left"))
-        prior = k - int(np.any(mi[:k] == market_id))
-        kr = int(np.searchsorted(rt, c, "left"))
-        kd = int(np.searchsorted(de, c, "right"))
-        full_ok, fft, fpm = False, np.nan, np.nan
+        k = np.searchsorted(mf, cs, "left")
+        here = np.flatnonzero(mi == market_id)
+        own = (mf[here[0]] < cs).astype(float) if len(here) else 0.0
+        out[:, 0] = k - own
+        kr = np.searchsorted(rt, cs, "left")
+        out[:, 1] = kr
+        out[:, 2] = rwc[kr]
+        out[:, 3] = rpc[kr]
+        out[:, 4] = cu[np.searchsorted(de, cs, "right")]
         f = self.full.get(w)
-        if f is not None and fb is not None and fb < c and f[0] < c:
-            full_ok, fft = True, f[0]
-            sel = f[2] < c
-            fpm = int(sel.sum()) - int(np.any(f[1][sel] == market_id))
-        return (prior, kr, int(rwc[kr]), float(rpc[kr]), float(cu[kd]), full_ok, fft, fpm)
+        if f is not None and fb is not None:
+            ok = (fb < cs) & (f[0] < cs)
+            if ok.any():
+                fts = np.sort(f[2])
+                fo = f[2][f[1] == market_id]
+                fpm = np.searchsorted(fts, cs, "left") - (fo.min() < cs if len(fo) else 0)
+                out[ok, 5] = 1.0
+                out[ok, 6] = f[0]
+                out[ok, 7] = fpm[ok]
+        return out
 
 
 def _load_market(conn, market_id: int, max_cutoff: float, src: Sources):
@@ -209,17 +221,50 @@ def _market_features(conn, market_id: int, cutoffs: list[float], lookbacks, src:
     np.minimum.at(first_idx, wcode, np.arange(n))
     first_idx_sorted = np.sort(first_idx)
 
-    # wallets appearing in any window -> fetch history once
+    C = np.asarray(sorted(cutoffs), float)
+    nc = len(C)
+    # (wallet, cutoff) pairs: wallet traded in [c - maxL, c)  <=>  c in (t_j, t_j + maxL]
+    lo = np.searchsorted(C, t, "right")
+    hi = np.searchsorted(C, t + maxl, "right")
+    cnt = hi - lo
+    if cnt.sum():
+        rep = np.repeat(np.arange(n), cnt)
+        ci = np.arange(cnt.sum()) - np.repeat(np.cumsum(cnt) - cnt, cnt) + lo[rep]
+        pair = np.unique(wcode[rep].astype(np.int64) * nc + ci)
+        del rep, ci
+    else:
+        pair = np.zeros(0, np.int64)
+    pk, pc = pair // nc, pair % nc
     in_any = np.zeros(nw, bool)
-    for c in cutoffs:
-        i1 = np.searchsorted(t, c, "left"); i0 = np.searchsorted(t, c - maxl, "left")
-        in_any[np.unique(wcode[i0:i1])] = True
+    in_any[pk] = True
     W = _Wallets(conn, [wuniq[k] for k in np.flatnonzero(in_any)], src)
     wfirst = np.array([W.first_t(w) if in_any[k] else np.nan for k, w in enumerate(wuniq)], float)
     age = t - wfirst[wcode] if n else np.zeros(0)
+    # attribute matrix per pair: 8 wallet as-of columns + concentration proxy
+    M = np.full((len(pair), 9), np.nan)
+    if len(pair):
+        order = np.argsort(wcode, kind="stable")
+        bounds = np.searchsorted(wcode[order], np.arange(nw + 1), "left")
+        pstart = np.searchsorted(pk, np.arange(nw + 1), "left")
+        dstart = np.floor(C / 86400) * 86400
+        for k in np.flatnonzero(in_any):
+            a, b = pstart[k], pstart[k + 1]
+            cs = C[pc[a:b]]
+            M[a:b, :8] = W.asof_many(wuniq[k], cs, market_id)
+            rows_k = order[bounds[k]:bounds[k + 1]]
+            tk = t[rows_k]
+            cu = np.concatenate([[0.0], np.cumsum(usd[rows_k])])
+            in_m = cu[np.searchsorted(tk, cs, "left")]
+            today = in_m - cu[np.searchsorted(tk, dstart[pc[a:b]], "left")]
+            den = M[a:b, 4] + today
+            with np.errstate(invalid="ignore", divide="ignore"):
+                M[a:b, 8] = np.where(den > 0, np.minimum(in_m / den, 1.0), np.nan)
+    by_c = np.argsort(pc, kind="stable")
+    cbounds = np.searchsorted(pc[by_c], np.arange(nc + 1), "left")
+    pos = np.full(nw, -1, np.int64)
 
     out = []
-    for c in cutoffs:
+    for ci_, c in enumerate(C):
         i1 = int(np.searchsorted(t, c, "left"))
         base = {
             "market_id": market_id, "cutoff_ts": c,
@@ -237,31 +282,23 @@ def _market_features(conn, market_id: int, cutoffs: list[float], lookbacks, src:
             "n_wallets_total": int(np.searchsorted(first_idx_sorted, i1, "left")),
             "category": category, "geo_subtype": geo_subtype, "in_scope": in_scope,
         }
-        # wallet attributes as of c for wallets in the largest window
-        i0m = int(np.searchsorted(t, c - maxl, "left"))
-        wc = np.unique(wcode[i0m:i1])
-        A = {}
-        if len(wc):
-            in_m = np.bincount(wcode[:i1], usd[:i1], minlength=nw)
-            dstart = math.floor(c / 86400) * 86400
-            i_d = int(np.searchsorted(t, dstart, "left"))
-            same_day = np.bincount(wcode[i_d:i1], usd[i_d:i1], minlength=nw)
-            for k in wc:
-                a = W.asof(wuniq[k], c, market_id)
-                den = a[4] + same_day[k]
-                conc = min(in_m[k] / den, 1.0) if den > 0 else np.nan
-                A[k] = a + (conc,)
+        rr = by_c[cbounds[ci_]:cbounds[ci_ + 1]]
+        pos[pk[rr]] = rr
+        A = (pos, M)
         for L in lbs:
             rec = dict(base)
             rec["lookback_h"] = L
             rec.update(_window(t, d, usd, snot, ypx, sz, prem, wcode, age, wfirst, first_idx, cgv, cns,
                                c, L * H, A, i1))
             out.append(rec)
+        pos[pk[rr]] = -1
     return out
 
 
 def _attr(A, ks, j, default=np.nan):
-    return np.array([A[k][j] if k in A else default for k in ks], float)
+    pos, M = A
+    idx = pos[ks]
+    return np.where(idx >= 0, M[np.maximum(idx, 0), j], default)
 
 
 def _window(t, d, usd, snot, ypx, sz, prem, wcode, age, wfirst, first_idx, cgv, cns, c, Ls, A, i1):
@@ -456,11 +493,12 @@ def compute_window_features(market_id: int, cutoff_ts, lookbacks=LOOKBACKS_H, co
 
 
 def to_wide(df: pd.DataFrame, key=("market_id", "cutoff_ts")) -> pd.DataFrame:
+    """Pivot the long output to one row per key with ``<feature>_<L>h`` window columns."""
     key = [k for k in key if k in df.columns]
-    extra = [c for c in ("snapshot_id",) if c in df.columns and c not in key]
+    ids = [c for c in ("snapshot_id", "market_id", "cutoff_ts") if c in df.columns and c not in key]
     cut = [c for c in CUTOFF_FEATURES if c in df.columns]
-    win = [c for c in df.columns if c not in set(key) | set(extra) | set(cut) | {"lookback_h"}]
-    first = df.drop_duplicates(key)[key + extra + cut]
-    piv = df.pivot_table(index=key, columns="lookback_h", values=win, aggfunc="first", dropna=False)
+    win = [c for c in df.columns if c not in set(key) | set(ids) | set(cut) | {"lookback_h"}]
+    first = df.drop_duplicates(key)[key + ids + cut]
+    piv = df.set_index(key + ["lookback_h"])[win].unstack("lookback_h")
     piv.columns = [f"{a}_{int(b)}h" for a, b in piv.columns]
     return first.merge(piv.reset_index(), on=key, how="left")
