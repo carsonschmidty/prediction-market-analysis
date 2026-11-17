@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pmflow"
+version = "0.1.0"
+description = "Informed-flow signal research on geopolitical prediction markets (public data only)"
+requires-python = ">=3.11"
+dependencies = [
+    "psycopg[binary]>=3.1",
+    "requests>=2.31",
+    "pandas>=2.1",
+    "pyarrow>=14",
+]
+
+[project.optional-dependencies]
+# Each role adds its own group below; do not edit other roles' groups.
+data = []
+
+[tool.setuptools.packages.find]
+where = ["src"]
